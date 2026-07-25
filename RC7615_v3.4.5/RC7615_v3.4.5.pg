@@ -1,7 +1,0 @@
-[header]
-device = PIC18F4685
-program1 = BOOT_RC7615-v3.4.5.hex
-sqtp_dir = 1E
-sqtp_len = 4
-params = 5
-

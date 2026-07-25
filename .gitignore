@@ -1,0 +1,15 @@
+# Entornos virtuales
+.venv/
+venv/
+env/
+ENV/
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Carpetas de editores o sistemas operativos
+.vscode/
+.idea/
+.DS_Store
