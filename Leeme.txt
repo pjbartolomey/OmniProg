@@ -1,3 +1,0 @@
-Cambiar: Cuando se use el driver PK5 y ademas haya que usar SQTP:
-    En el uso de SQTP si es PK5 generamos el archivo result.num en lugar de usar la funcion de merge.
-    En la generacion del comando añadimos -SQTP result.num si se deben usar SQTP
