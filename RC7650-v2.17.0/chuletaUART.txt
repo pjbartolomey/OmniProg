@@ -1,0 +1,4 @@
+./serialnumLPC.pl 0x1A07FE04 0xNS_VALUE > sn.hex
+./hexMerge.pl bootloader_app.hex RC7650.hex sn.hex > result.hex
+
+.\fmps.exe --device LPC4337 --serialport COM3 --baudrate 115200 --erasedevice --program="./prg/result.hex"

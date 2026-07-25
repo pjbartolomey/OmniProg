@@ -1,0 +1,5 @@
+[header]
+program1 = bootloader_app_RC7650-v2.0.0.hex
+program2 = RC7650-v2.17.0.hex
+sqtp_dir = 0x1A07FE04
+Device = device(LPC4337,12.000,0)
