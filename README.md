@@ -27,6 +27,10 @@ Para ejecutar este proyecto en tu entorno local (como Debian u otras distribucio
    python3 OmniProg.py
    ```
 
+#  Convertir a ejecutable (Omniprog.exe)
+   ```bash
+   Usa pyinstaller
+   ```
 ## 📂 Estructura del Proyecto
 
 * `OmniProg.py`: Archivo principal que arranca la aplicación.
