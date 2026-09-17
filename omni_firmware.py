@@ -4,12 +4,96 @@ Módulo de Backend para el procesamiento de Firmware y SQTP en OmniProg
 """
 import os
 import io
-import configparser
 from intelhex import IntelHex
 import omni_lib
 import psutil  # Para comprobar si el PID sigue vivo de forma multiplataforma
-from PySide6.QtWidgets import QFileDialog
+from PySide6.QtWidgets import QMessageBox, QFileDialog
 
+import re
+from intelhex import IntelHex
+
+from PySide6.QtWidgets import QMessageBox  # Nota: Para mensajes de alerta es mejor QMessageBox que QFileDialog
+import re
+from intelhex import IntelHex
+
+def generar_archivo_intel_hex_sqtp(sqtp_dir, sqtp_len, sqtp_num, ruta_salida, device):
+    print('generar_archivo_intel_hex_sqtp:\t', sqtp_dir, sqtp_len, sqtp_num, ruta_salida, device)
+    
+    # 1. Normalizar el nombre del dispositivo para identificar la familia
+    dev_upper = device.upper().strip()
+    
+    if re.search(r'PIC(10|12|16)', dev_upper):
+        familia = "PIC16"
+    elif "PIC18" in dev_upper:
+        familia = "PIC18"
+    elif "PIC24" in dev_upper or "DSPIC" in dev_upper:
+        familia = "PIC24"
+    else:
+        # Mostramos la alerta visual en la interfaz UI
+        QMessageBox.critical(
+            None, 
+            "Error de Dispositivo", 
+            f"La familia del dispositivo '{device}' no es compatible o no fue reconocida.\n"
+            "El proceso de programación se cancelará."
+        )
+        # FORZAMOS LA EXCEPCIÓN para detener la subrutina y activar el except externo
+        raise ValueError(f"Familia no reconocida para el dispositivo: {device}")
+
+    # --- El resto del código solo se ejecuta si NO entró al else ---
+    try:
+        # 2. Parsear parámetros básicos de entrada
+        longitud_bytes = int(sqtp_len)
+        direccion_base = int(sqtp_dir, 16)
+        
+        # Ajustar direccionamiento físico según la familia
+        if familia in ["PIC18", "PIC24"]:
+            direccion_inicio = direccion_base * 2
+        else:  
+            direccion_inicio = direccion_base
+
+        # 3. Convertir el string hex a bytes crudos con el padding correcto
+        hex_puro = sqtp_num.replace(" ", "").zfill(longitud_bytes * 2)
+        datos_bytes = bytes.fromhex(hex_puro)
+        
+        if len(datos_bytes) > longitud_bytes:
+            datos_bytes = datos_bytes[-longitud_bytes:]
+            
+        # 4. Invertir el orden a Little Endian
+        datos_little_endian = datos_bytes[::-1]
+        
+        # 5. Construir el bloque binario empaquetado según la arquitectura
+        bloque_final = bytearray()
+        
+        if familia == "PIC16":
+            for b in datos_little_endian:
+                bloque_final.append(b)       
+                bloque_final.append(0x08)    
+                
+        elif familia == "PIC18":
+            for b in datos_little_endian:
+                bloque_final.append(b)       
+                bloque_final.append(0x0C)    
+                
+        elif familia == "PIC24":
+            for i in range(0, len(datos_little_endian), 2):
+                b_bajo = datos_little_endian[i]
+                b_alto = datos_little_endian[i+1] if (i+1) < len(datos_little_endian) else 0x00
+                bloque_final.append(b_bajo)  
+                bloque_final.append(b_alto)  
+                bloque_final.append(0x00)    
+                bloque_final.append(0x00)    
+
+        # 6. Inicializar IntelHex e inyectar el bloque estructurado
+        ih = IntelHex()
+        ih.frombytes(bloque_final, offset=direccion_inicio)
+        
+        # 7. Exportar el archivo .num compatible con IPECMD
+        ih.write_hex_file(ruta_salida)
+        print(f"[{familia}] Archivo SQTP generado exitosamente en: {ruta_salida}")
+
+    except Exception as e:
+        # Si ocurre un error interno de parseo, lo relanzamos para que lo capture la rutina principal
+        raise RuntimeError(f"Error interno generando Intel HEX: {e}")
 
 def generar_consecutivos_sqtp(numero_inicial_hex, cantidad, longitud, directorio_defecto, parent=None):
     """
@@ -78,53 +162,53 @@ def generar_consecutivos_sqtp(numero_inicial_hex, cantidad, longitud, directorio
     except IOError as e:
         return False, f"Error crítico de escritura en disco: {str(e)}"
 
-def fusionar_e_inyectar_sqtp(archivo_pg, numero_sqtp_str):
+def inyectar_sqtp(hex_target, sqtp_dir, sqtp_len, sqtp_num, ruta_salida, checksum_dir=None):
     """
-    Fusiona Program1 y Program2, e inyecta el número SQTP en la dirección indicada.
-    Genera el archivo 'result.hex' en la misma carpeta que el .pg.
+    Inyecta el SQTP y calcula el checksum global de todo el firmware.
+    Si se pasa 'checksum_dir', inyecta el checksum resultante (2 bytes, little endian) en esa dirección.
     """
-    config_local = configparser.ConfigParser()
-    config_local.read(archivo_pg)
-    carpeta = os.path.dirname(archivo_pg)
-    archivo_resultado = os.path.join(carpeta, 'result.hex')
-    
-    # Limpieza previa del entorno
-    if os.path.exists(archivo_resultado):
+    if os.path.exists(ruta_salida):
         try:
-            os.remove(archivo_resultado)
+            os.remove(ruta_salida)
         except OSError:
-            return False, "Error al eliminar el archivo result.hex antiguo."
-            
+            return False, "Error al eliminar el archivo antiguo."
+           
     try:
-        # Carga y procesado de Program1
-        prog1_name = config_local.get('header', 'Program1')
-        program1_path = os.path.join(carpeta, prog1_name)
         ih_master = IntelHex()
-        ih_master.fromfile(program1_path, format='hex')
+        ih_master.fromfile(hex_target, format='hex')
+
+        # 1. Inyección del SQTP
+        hexdir = int(sqtp_dir, 16) if isinstance(sqtp_dir, str) else int(sqtp_dir)
+        hexvalue = int(sqtp_num, 16) if isinstance(sqtp_num, str) else int(sqtp_num)
+        length = int(sqtp_len)
+
+        hexvalue_bin = hexvalue.to_bytes(length, 'little')
+        ih_master.puts(hexdir, hexvalue_bin)
+
+        print ('inyectar_sqtp:\t',hex_target, sqtp_dir, sqtp_len, sqtp_num, ruta_salida, checksum_dir)
+        # 2. Cálculo del Checksum Global (Suma de todos los bytes cargados)
+        # 3. Inyección opcional del Checksum en el mapa de memoria
+        if checksum_dir is not None:
+            # Obtenemos un diccionario con todos los bytes rellenos en el archivo
+            dict_bytes = ih_master.todict()
+            
+            # Sumamos el valor de cada byte y aplicamos máscara de 16 bits (0xFFFF)
+            # Nota: Si tu firmware requiere excluir la zona del propio checksum, avísame.
+            checksum_total = sum(dict_bytes.values()) & 0xFFFF
         
-        # Procesado de Program2 (Opcional si el archivo .pg tiene cargador secundario)
-        if config_local.has_option('header', 'Program2'):
-            prog2_name = config_local.get('header', 'Program2')
-            if prog2_name.strip():
-                program2_path = os.path.join(carpeta, prog2_name)
-                ih_2 = IntelHex()
-                ih_2.fromfile(program2_path, format='hex')
-                ih_master.merge(ih_2, overlap='replace')
-                
-        # Inyección del SQTP usando la misma lógica unificada de bytes
-        mensaje, dir_str = omni_lib.readpg(archivo_pg, 'SQTP_Dir')
-        hexdir = int(dir_str, 16)
-        hexvalue = int(numero_sqtp_str, 16)
+            print(f"Checksum calculado (16 bits): 0x{checksum_total:04X}")
+
+            chk_dir_int = int(checksum_dir, 16) if isinstance(checksum_dir, str) else int(checksum_dir)
+            checksum_bin = checksum_total.to_bytes(2, 'little')
+            ih_master.puts(chk_dir_int, checksum_bin)
+            print(f"Checksum guardado en la dirección: {checksum_dir}")
+
+        # Guardado final
+        ih_master.write_hex_file(ruta_salida)
+        return True, f"Inyección y checksum (0x{checksum_total:04X}) completados."
         
-        # Formateo a 7 bytes little endian para la flash
-        hexvalue_bin = hexvalue.to_bytes(7, 'little')
-        ih_master.putsz(hexdir, hexvalue_bin)
-        
-        # Guardado en disco
-        ih_master.write_hex_file(archivo_resultado)
-        return True, "Fusión e inyección completada con éxito."
     except Exception as e:
-        return False, f"Fallo en procesamiento IntelHex: {str(e)}"
+        return False, f"Fallo en procesamiento: {str(e)}"
 
 def extraer_siguiente_sqtp(archivo_sq):
     """
@@ -148,47 +232,3 @@ def extraer_siguiente_sqtp(archivo_sq):
         return None, None, None
     except IOError:
         return None, None, None
-
-def intentar_bloquear_sqtp(archivo_sqtp):
-    """
-    Intenta crear un archivo .lock al lado del archivo SQTP.
-    Devuelve (True, '') si se bloqueó con éxito.
-    Devuelve (False, 'Mensaje') si ya está bloqueado por otra instancia viva.
-    """
-    ruta_lock = archivo_sqtp + ".lock"
-    pid_actual = os.getpid()
-    
-    if os.path.exists(ruta_lock):
-        try:
-            # Leemos el PID de la ventana que supuestamente lo bloqueó
-            with open(ruta_lock, 'r') as f:
-                pid_bloqueado = int(f.read().strip())
-                
-            # Comprobamos si esa instancia vieja sigue corriendo en el S.O.
-            if psutil.pid_exists(pid_bloqueado):
-                return False, f"El archivo SQTP ya está siendo usado por la instancia con PID {pid_bloqueado}."
-            else:
-                # Es un bloqueo fantasma de una caída anterior: lo borramos de forma segura
-                os.remove(ruta_lock)
-        except Exception:
-            # Si el archivo .lock está corrupto o ilegible, asumimos que podemos sobreescribirlo
-            pass
-
-    try:
-        # Creamos el archivo de bloqueo atómico con nuestro PID actual
-        with open(ruta_lock, 'w') as f:
-            f.write(str(pid_actual))
-        return True, ""
-    except IOError as e:
-        return False, f"No se pudo crear el archivo de bloqueo: {str(e)}"
-
-def liberar_bloqueo_sqtp(archivo_sqtp):
-    """Elimina el archivo .lock asociado al SQTP al cerrar la ventana o cambiar de proyecto."""
-    if not archivo_sqtp:
-        return
-    ruta_lock = archivo_sqtp + ".lock"
-    if os.path.exists(ruta_lock):
-        try:
-            os.remove(ruta_lock)
-        except Exception:
-            pass

@@ -225,6 +225,9 @@
         </item>
         <item>
          <widget class="QPushButton" name="Button_rescan">
+          <property name="enabled">
+           <bool>true</bool>
+          </property>
           <property name="minimumSize">
            <size>
             <width>30</width>
@@ -540,6 +543,9 @@
              <property name="minimum">
               <number>1</number>
              </property>
+             <property name="maximum">
+              <number>8</number>
+             </property>
             </widget>
            </item>
            <item row="0" column="4">
@@ -567,7 +573,47 @@
          <string>Create PG File</string>
         </property>
         <layout class="QGridLayout" name="gridLayout_11">
-         <item row="6" column="0">
+         <item row="0" column="0">
+          <layout class="QHBoxLayout" name="horizontalLayout_10">
+           <item>
+            <widget class="QLabel" name="label_7">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>120</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>Program (hex)</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QLineEdit" name="line_Prog_hex1">
+             <property name="enabled">
+              <bool>false</bool>
+             </property>
+             <property name="text">
+              <string/>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QToolButton" name="Button_Prog_hex1">
+             <property name="text">
+              <string>...</string>
+             </property>
+            </widget>
+           </item>
+          </layout>
+         </item>
+         <item row="5" column="0">
           <widget class="QPushButton" name="Button_createpg">
            <property name="enabled">
             <bool>true</bool>
@@ -577,7 +623,33 @@
            </property>
           </widget>
          </item>
-         <item row="5" column="0">
+         <item row="2" column="0">
+          <layout class="QHBoxLayout" name="horizontalLayout_12">
+           <item>
+            <widget class="QLabel" name="label_9">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>120</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>device:</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QComboBox" name="comboBox_device"/>
+           </item>
+          </layout>
+         </item>
+         <item row="4" column="0">
           <layout class="QHBoxLayout" name="horizontalLayout_14">
            <item>
             <widget class="QLabel" name="label_12">
@@ -601,53 +673,10 @@
            <item>
             <widget class="QLineEdit" name="line_params">
              <property name="enabled">
-              <bool>false</bool>
-             </property>
-             <property name="text">
-              <string/>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </item>
-         <item row="1" column="0">
-          <layout class="QHBoxLayout" name="horizontalLayout_11">
-           <item>
-            <widget class="QLabel" name="label_8">
-             <property name="minimumSize">
-              <size>
-               <width>120</width>
-               <height>0</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>120</width>
-               <height>16777215</height>
-              </size>
-             </property>
-             <property name="text">
-              <string>program2 (hex)</string>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLineEdit" name="line_Prog_hex2">
-             <property name="enabled">
-              <bool>false</bool>
-             </property>
-             <property name="text">
-              <string/>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QToolButton" name="Button_Prog_hex2">
-             <property name="enabled">
               <bool>true</bool>
              </property>
              <property name="text">
-              <string>...</string>
+              <string/>
              </property>
             </widget>
            </item>
@@ -677,94 +706,24 @@
            <item>
             <widget class="QLineEdit" name="line_sqtp_dir">
              <property name="enabled">
-              <bool>false</bool>
+              <bool>true</bool>
              </property>
              <property name="text">
               <string/>
              </property>
             </widget>
            </item>
-          </layout>
-         </item>
-         <item row="0" column="0">
-          <layout class="QHBoxLayout" name="horizontalLayout_10">
-           <item>
-            <widget class="QLabel" name="label_7">
-             <property name="minimumSize">
-              <size>
-               <width>120</width>
-               <height>0</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>120</width>
-               <height>16777215</height>
-              </size>
-             </property>
-             <property name="text">
-              <string>program1 (hex)</string>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QLineEdit" name="line_Prog_hex1">
-             <property name="enabled">
-              <bool>false</bool>
-             </property>
-             <property name="text">
-              <string/>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QToolButton" name="Button_Prog_hex1">
-             <property name="text">
-              <string>...</string>
-             </property>
-            </widget>
-           </item>
-          </layout>
-         </item>
-         <item row="2" column="0">
-          <layout class="QHBoxLayout" name="horizontalLayout_12">
-           <item>
-            <widget class="QLabel" name="label_9">
-             <property name="minimumSize">
-              <size>
-               <width>120</width>
-               <height>0</height>
-              </size>
-             </property>
-             <property name="maximumSize">
-              <size>
-               <width>120</width>
-               <height>16777215</height>
-              </size>
-             </property>
-             <property name="text">
-              <string>device:</string>
-             </property>
-            </widget>
-           </item>
-           <item>
-            <widget class="QComboBox" name="comboBox_device"/>
-           </item>
-          </layout>
-         </item>
-         <item row="4" column="0">
-          <layout class="QHBoxLayout" name="horizontalLayout_15">
            <item>
             <widget class="QLabel" name="label_11">
              <property name="minimumSize">
               <size>
-               <width>120</width>
+               <width>80</width>
                <height>0</height>
               </size>
              </property>
              <property name="maximumSize">
               <size>
-               <width>120</width>
+               <width>80</width>
                <height>16777215</height>
               </size>
              </property>
@@ -778,7 +737,36 @@
              <property name="minimum">
               <number>1</number>
              </property>
+             <property name="maximum">
+              <number>8</number>
+             </property>
             </widget>
+           </item>
+          </layout>
+         </item>
+         <item row="1" column="0">
+          <layout class="QHBoxLayout" name="horizontalLayout_11">
+           <item>
+            <widget class="QLabel" name="label_8">
+             <property name="minimumSize">
+              <size>
+               <width>120</width>
+               <height>0</height>
+              </size>
+             </property>
+             <property name="maximumSize">
+              <size>
+               <width>120</width>
+               <height>16777215</height>
+              </size>
+             </property>
+             <property name="text">
+              <string>Driver:</string>
+             </property>
+            </widget>
+           </item>
+           <item>
+            <widget class="QComboBox" name="comboBox_driver"/>
            </item>
           </layout>
          </item>
@@ -792,6 +780,7 @@
   <widget class="QStatusBar" name="statusbar"/>
  </widget>
  <tabstops>
+  <tabstop>tabWidget</tabstop>
   <tabstop>line_Prog</tabstop>
   <tabstop>Button_Prog</tabstop>
   <tabstop>line_SQTP</tabstop>
@@ -802,7 +791,6 @@
   <tabstop>line_SQTPNumber</tabstop>
   <tabstop>Button_program</tabstop>
   <tabstop>textEdit</tabstop>
-  <tabstop>tabWidget</tabstop>
   <tabstop>line_Num_Ini</tabstop>
   <tabstop>QSpin_Cantidad</tabstop>
   <tabstop>QSpin_SQTPLen1</tabstop>
@@ -811,14 +799,14 @@
   <tabstop>Button_Prog_1</tabstop>
   <tabstop>line_Prog_2</tabstop>
   <tabstop>Button_Prog_2</tabstop>
+  <tabstop>Button_Merge</tabstop>
+  <tabstop>Button_Compare</tabstop>
   <tabstop>Button_C_Reset</tabstop>
   <tabstop>line_Prog_hex1</tabstop>
   <tabstop>Button_Prog_hex1</tabstop>
-  <tabstop>line_Prog_hex2</tabstop>
-  <tabstop>Button_Prog_hex2</tabstop>
+  <tabstop>comboBox_driver</tabstop>
   <tabstop>comboBox_device</tabstop>
   <tabstop>line_sqtp_dir</tabstop>
-  <tabstop>QSpin_SQTPLen2</tabstop>
   <tabstop>line_params</tabstop>
   <tabstop>Button_createpg</tabstop>
  </tabstops>

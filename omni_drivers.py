@@ -6,6 +6,8 @@ import os
 import subprocess
 import shlex
 import serial.tools.list_ports
+from intelhex import IntelHex
+import struct
 
 def buscar_puertos_serial():
     """
@@ -30,6 +32,8 @@ def buscar_pickit5(executable_path):
     try:
         # Dividimos el comando complejo del .ini de forma segura
         partes_comando = shlex.split(executable_path)
+        # Configuración correcta para Windows (posix=False)
+        #partes_comando = shlex.split(executable_path,posix=False))
         if not partes_comando:
             return []
             
@@ -42,7 +46,7 @@ def buscar_pickit5(executable_path):
             
         # Forzamos los flags oficiales de listado de herramientas: -T (Tool) junto a -OL (List)
         comando_ejecucion = partes_comando + ["-T", "-OL"]
-        
+        print ('comando_ejecucion:\t',comando_ejecucion)
         # --- SOLUCIÓN INDUSTRIAL: Clonar e inyectar el entorno del sistema ---
         # Esto asegura que Java localice las librerías nativas (.so) de Microchip y los permisos de USB de Linux
         entorno_planta = os.environ.copy()
@@ -53,7 +57,7 @@ def buscar_pickit5(executable_path):
             capture_output=True,
             text=True, 
             env=entorno_planta, # Inyección de variables de entorno
-            timeout=10          # Subimos ligeramente a 10s por el retardo de inicialización de Java en Linux
+            timeout=20          # Subimos ligeramente a 10s por el retardo de inicialización de Java en Linux
         )
         
         # Microchip a veces vuelca la lista de herramientas en stderr en lugar de stdout según la versión de JRE
@@ -97,7 +101,18 @@ def escanear_hardware(tipo_driver, executable_path):
     buscador = MAPA_HARDWARE.get(tipo_driver, lambda path: buscar_puertos_serial())
     return buscador(executable_path)
 
-def preparar_comando_consola(tipo_driver, executable_path, mcu_device, target_port, hex_file, params_ini, params_pg):
+def preparar_comando_consola(tipo_driver, executable_path, mcu_device, target_port, hex_file, params_ini, params_pg, num_file, program_name):
+    print ('preparar_comando_consola')
+    print ('tipo_driver:\t',tipo_driver)
+    print ('executable_path:\t',executable_path)
+    print ('mcu_device:\t',mcu_device)
+    print ('target_port:\t',target_port)
+    print ('hex_file:\t',hex_file)
+    print ('params_ini:\t',params_ini)
+    print ('params_pg:\t',params_pg)
+    print ('num_file:\t',num_file)
+    print ('program_name:\t',program_name)
+
     """
     Motor universal de OmniProg basado en plantillas con marcadores % de posición.
     Sustituye dinámicamente las variables de planta en la plantilla del .ini.
@@ -122,8 +137,9 @@ def preparar_comando_consola(tipo_driver, executable_path, mcu_device, target_po
         "%params": params_pg.strip(),
         "%port": port_full,
         "%portn": port_number,
-        "%baudrate": params_ini.get("baudrate", "115200").strip(),
-        "%hex": hex_file
+        "%hex": hex_file,
+        "%num": num_file,
+        "%program": program_name
     }
 
     comando_parseado = plantilla
@@ -133,8 +149,10 @@ def preparar_comando_consola(tipo_driver, executable_path, mcu_device, target_po
         valor_real = valores_sustitucion[marcador]
         comando_parseado = comando_command = comando_parseado.replace(marcador, valor_real)
 
-    if tipo_driver == "pickit5":
+    if tipo_driver == "pickit5_":
         lista_argumentos = shlex.split(comando_parseado)
+        # Configuración correcta para Windows (posix=False)
+        #lista_argumentos = shlex.split(comando_parseado, posix=False)
         return lista_argumentos, False
-        
+    print ('comando_parseado: ',comando_parseado) 
     return comando_parseado, True

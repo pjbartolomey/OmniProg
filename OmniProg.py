@@ -11,24 +11,23 @@ import subprocess
 import os
 import io
 import time
-import configparser
-from intelhex import IntelHex
 
 import omni_lib
 import omni_firmware
 import omni_drivers
 
-
 from PySide6 import QtCore, QtGui, QtWidgets
 from PySide6.QtCore import QRegularExpression
 from PySide6.QtGui import QPixmap, QRegularExpressionValidator
 from PySide6.QtWidgets import QMessageBox, QFileDialog
-
+from datetime import datetime
+from intelhex import IntelHex
+from pathlib import Path
 
 # Importamos la interfaz moderna recién generada
 from OmniProg_ui import Ui_MainWindow
 
-VERSION = 'Ver: 1.0.0 (OmniProg)'
+VERSION = 'Ver: 1 (OmniProg)'
 
 def process_cl_args():
     parser = argparse.ArgumentParser()
@@ -45,12 +44,12 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         # --- ENCAPSULACIÓN MAESTRA (Multi-instancia segura) ---
         self.version = VERSION
         self.omniprog_ini = 'OmniProg.ini'
+        self.omniprog_log = 'Error.log'
         self.lines = []
         self.puntero_lines = 0
         self.need_sqtp = 0
-        self.motor_activo = ''  # Guardará 'flashmagic', 'IPECMD', etc.
+        self.driver_activo = ''  # Guardará 'flashmagic', 'IPECMD', etc.
         self.mcu_device = ''     # Modelo específico del micro extraído del .pg
-        self.debug = 0           # <--- AÑADIR ESTA LÍNEA: Guarda el estado de depuración de planta
         
         # Contadores aislados por ventana
         self.count = 0
@@ -62,15 +61,19 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         self.Checkini()
         
         # Validación moderna hexadecimal de 8 dígitos para Qt6
-        regex_hex = QRegularExpression('^[0-9A-Fa-f]{8}$')
+        regex_hex = QRegularExpression('^[0-9A-Fa-f]{16}$')
         self.line_Num_Ini.setValidator(QRegularExpressionValidator(regex_hex, self))
         self.line_SQTPNumber.setValidator(QRegularExpressionValidator(regex_hex, self))
+        self.line_sqtp_dir.setValidator(QRegularExpressionValidator(regex_hex, self))
+        # Ejecuta la función una vez al inicio para aplicar la validación inicial
+        #self.FormatoSQTP(self.QSpin_SQTPLen1.value())
+        #self.Formatoline_Num_Ini(16)
         
         # --- CONEXIÓN DE EVENTOS GRÁFICOS ---
         self.Button_Generar.clicked.connect(self.Generar)
         self.Button_Prog.clicked.connect(self.OpenPrograma)
         self.Button_SQTP.clicked.connect(self.OpenSQTP)
-        self.Button_program.clicked.connect(self.program)
+        self.Button_program.clicked.connect(self.LaunchProgram)
         self.check_SQTPMan.stateChanged.connect(self.ManSQTP)
         self.Button_rescan.clicked.connect(self.RefreshPortList)
         
@@ -80,8 +83,8 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         self.Button_Compare.clicked.connect(self.CompararHexNativo)
         self.Button_C_Reset.clicked.connect(self.ResetCounter)
 
+        self.QSpin_SQTPLen1.valueChanged.connect(self.Formatoline_Num_Ini)
         self.Button_Prog_hex1.clicked.connect(self.Selecthex_hex1)
-        self.Button_Prog_hex2.clicked.connect(self.Selecthex_hex2)
         self.Button_createpg.clicked.connect(self.CreatePGFile)
         
         # Inicialización de entorno base
@@ -92,24 +95,20 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
             self.CargarPrograma()
 
         # Inicializar el combo del creador de archivos .pg leyendo el archivo .ini de planta
-        self.InicializarCreadorPG()
+        self.InicializarCreadorPGdriver()
+
+        # Inicializar el combo del creador de archivos .pg leyendo el archivo .ini de planta
+        self.InicializarCreadorPGdevice()
 
     def Checkini(self):
         """Inicializa las rutas buscando de forma segura los parámetros base en el archivo .ini."""
         carpeta_del_exe = os.path.dirname(os.path.realpath(sys.argv[0]))
         self.omniprog_ini = os.path.join(carpeta_del_exe, 'OmniProg.ini')
-        
+        self.omniprog_log = os.path.join(carpeta_del_exe, 'Error.log')        
         try:
             # Reutilizamos la función robustecida de omni_lib
             self.defaultprogdir = omni_lib.readini(self.omniprog_ini, "Default", "defaultprogdir")
             self.defaultsqtpdir = omni_lib.readini(self.omniprog_ini, "Default", "defaultsqtpdir")
-            
-            # Capturamos el parámetro debug de forma segura (0 por defecto si falla o no existe)
-            try:
-                self.debug = int(omni_lib.readini(self.omniprog_ini, "Default", "debug"))
-            except Exception:
-                self.debug = 0
-                
         except FileNotFoundError as e:
             self.showdialog(f"Falta el archivo de configuración obligatorio:\n{str(e)}")
             sys.exit(1)
@@ -117,69 +116,44 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
             self.showdialog(f"Error crítico de inicialización:\n{str(e)}\n\nPor favor, revise el archivo .ini.")
             sys.exit(1)
 
-    def buscar_motor_para_micro(self, mcu_model):
-        """Escanea el .ini para determinar qué motor controla al micro."""
-        cparser = configparser.ConfigParser()
-        cparser.read(self.omniprog_ini)
-        
-        for seccion in cparser.sections():
-            if seccion == "Default":
-                continue
-            if cparser.has_option(seccion, "micros"):
-                lista_micros = [m.strip() for m in cparser.get(seccion, "micros").split(',')]
-                if mcu_model in lista_micros:
-                    return seccion
-        return None
-
     def RefreshPortList(self):
         """
         Rutina universal agnóstica al fabricante.
-        Muestra trazas detalladas de escaneo en el textEdit si debug = 1.
+        #La llamada a esta rutina puede venir del boton refrescar o de la carga de un archivo pg.
+        Si hay programa programa solo cargaremos los dispositivos validos para el driver. 
         """
         self.Button_rescan.setEnabled(False)
         QtWidgets.QApplication.processEvents()
         
         self.comboBoxPort.clear()
         self.comboBoxPort.addItem(' ') # Índice cero vacío por seguridad
-        
-        cparser = configparser.ConfigParser()
-        cparser.read(self.omniprog_ini)
-        
+
         tipo_driver = "serial"
         executable_path = ""
-        
-        if cparser.has_section(self.motor_activo):
-            if cparser.has_option(self.motor_activo, "driver"):
-                tipo_driver = cparser.get(self.motor_activo, "driver").strip()
-            if cparser.has_option(self.motor_activo, "path"):
-                executable_path = cparser.get(self.motor_activo, "path").replace('"', '')
+        if (self.archivo):
+            _, self.driver_activo = omni_lib.readpg(self.archivo, 'Driver')
+            tipo_driver = omni_lib.readini(self.omniprog_ini, self.driver_activo, "com_method").strip()
+            executable_path = omni_lib.readini(self.omniprog_ini, self.driver_activo, "path").replace('"', '')
                 
-        # --- TRAZAS DE DEPURACIÓN EN INTERFAZ (DEBUG ACTIVO) ---
-        if self.debug == 1:
-            #self.textEdit.clear()
-            self.textEdit.append("=== REFRESH PORTS (DEBUG) ===")
-            self.textEdit.append(f"Motor Activo Detectado: [{self.motor_activo.upper()}]")
-            self.textEdit.append(f"Tipo de Driver a escanear: {tipo_driver}")
-            self.textEdit.append(f"Ruta del Ejecutable asignada: {executable_path if executable_path else 'N/A (Serial Puro)'}")
-            QtWidgets.QApplication.processEvents()
+        # --- TRAZAS DE DEPURACIÓN EN INTERFAZ ---
+        self.textEdit.clear()
+        self.textEdit.append("=== REFRESH PORTS ===")
+        self.textEdit.append(f"Driver Activo detectado: {self.driver_activo}")
+        self.textEdit.append(f"Tipo de Driver a escanear: {tipo_driver}")
+        self.textEdit.append(f"Ruta del Ejecutable asignada: {executable_path if executable_path else 'N/A (Serial Puro)'}")
+        QtWidgets.QApplication.processEvents()
 
         try:
             lista_dispositivos = omni_drivers.escanear_hardware(tipo_driver, executable_path)
             
             if lista_dispositivos:
                 self.comboBoxPort.addItems(lista_dispositivos)
-                if self.debug == 1:
-                    self.textEdit.append(f"Hardware Encontrado con éxito: {lista_dispositivos}")
+                self.textEdit.append(f"Hardware Encontrado con éxito: {lista_dispositivos}")
             else:
-                if self.debug == 1:
-                    self.textEdit.append("Resultado del escaneo: No se detectó ningún hardware activo.")
-                    if tipo_driver == "pickit5":
-                        self.textEdit.append("Ayuda PICkit5: Verifique que el programador USB esté conectado y que la ruta de ipecmd en el .ini sea correcta.")
+                self.textEdit.append("Resultado del escaneo: No se detectó ningún hardware activo.")
                         
         except Exception as e:
             self.showdialog(f"Error durante el escaneo de hardware: {str(e)}")
-            if self.debug == 1:
-                self.textEdit.append(f"Fallo Crítico en Escaneo: {str(e)}")
         finally:
             # Seleccionamos el programador recién detectado si existe algo más que el espacio en blanco
             if self.comboBoxPort.count() > 1:
@@ -194,272 +168,34 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
             self.Button_rescan.setEnabled(True)
             QtWidgets.QApplication.processEvents()
 
-    def CargarPrograma(self):
-        self.line_Prog.clear()
-        
-        # --- CORRECCIÓN INDUSTRIAL DE SINCRONIZACIÓN ---
-        if self.archivo and os.path.exists(self.archivo):
-            os.chdir(os.path.dirname(os.path.realpath(self.archivo)))
+    def Formatoline_Num_Ini(self, valor):
+        self.line_Num_Ini.clear()
+        caracteres_hex = valor * 2
+        # Genera el regex dinámicamente con la cantidad de caracteres actual del QSpinBox
+        regex_dinamico = f'^[0-9A-Fa-f]{{{caracteres_hex}}}$'
+        # Crea y aplica el nuevo validador
+        regex_hex = QRegularExpression(regex_dinamico)
+        self.line_Num_Ini.setValidator(QRegularExpressionValidator(regex_hex, self))
 
-        # Comprobar el modelo del chip declarado en el archivo .pg
-        mensaje, device_str = omni_lib.readpg(self.archivo, 'Device')
-        if mensaje or not device_str:
-            self.showdialog('Error: No se define la variable "Device" dentro del archivo .pg')
-            self.archivo = ''
-            return
-            
-        self.mcu_device = device_str.strip()
-        self.motor_activo = self.buscar_motor_para_micro(self.mcu_device)
-        
-        if not self.motor_activo:
-            self.showdialog(f'Error: El microcontrolador [{self.mcu_device}] no está registrado en OmniProg.ini')
-            self.archivo = ''
-            return
-            
-        # Analizar si requiere SQTP
-        mensaje, valor = omni_lib.readpg(self.archivo, 'SQTP_Dir')
-        self.need_sqtp = 0 if mensaje else 1
-            
-        if self.need_sqtp == 0:
-            self.Button_SQTP.setEnabled(False)
-            self.check_SQTPMan.setEnabled(False)
-            self.line_SQTP.clear()
-            self.line_SQTPNumber.clear()
-            self.line_Prog.setText(self.archivo)
+    def FormatoSQTP(self, valor):
+        caracteres_hex = valor * 2
+        #print ('len:',len(self.line_SQTPNumber.text()),'\t',caracteres_hex)
+        if (len(self.line_SQTPNumber.text()) != caracteres_hex):
+            self.line_SQTPNumber.setText('0' * caracteres_hex)
+        regex_dinamico = f'^[0-9A-Fa-f]{{{caracteres_hex}}}$'
+        # Crea y aplica el nuevo validador
+        regex_hex = QRegularExpression(regex_dinamico)
+        self.line_SQTPNumber.setValidator(QRegularExpressionValidator(regex_hex, self))
+
+    def ManSQTP(self):
+        if self.check_SQTPMan.isChecked():
+            self.FormatoSQTP(self.QSpin_SQTPLen1.value())
+            self.line_SQTPNumber.setEnabled(True)
         else:
-            self.Button_SQTP.setEnabled(True)
-            self.check_SQTPMan.setEnabled(True)
-            self.line_Prog.setText(self.archivo)
-            
-        # --- AUTOMATIZACIÓN REACTIVA: PRECONFIGURACIÓN DE LA PESTAÑA TOOLS ---
-        try:
-            # 1. Leer variables adicionales del archivo .pg de manera preventiva
-            _, p_sqtp_dir = omni_lib.readpg(self.archivo, 'SQTP_Dir')
-            _, p_sqtp_len = omni_lib.readpg(self.archivo, 'SQTP_Len')
-            _, p_params = omni_lib.readpg(self.archivo, 'params')
-            _, p_prog1 = omni_lib.readpg(self.archivo, 'Program1')
-            _, p_prog2 = omni_lib.readpg(self.archivo, 'Program2')
-
-            # 2. Bloque SQTP Generate: Sincronizar 'Length (Bytes)'
-            if p_sqtp_len and str(p_sqtp_len).strip().isdigit():
-                self.QSpin_SQTPLen1.setValue(int(str(p_sqtp_len).strip()))
-
-            # 3. Bloque Create PG File: Sincronizar combobox 'device'
-            # Buscamos si el dispositivo del .pg existe en el combobox para seleccionarlo
-            idx_device = self.comboBox_device.findText(self.mcu_device)
-            if idx_device >= 0:
-                self.comboBox_device.setCurrentIndex(idx_device)
-            else:
-                # Si el micro no estaba en la lista ordenada del combo, lo añadimos y seleccionamos
-                self.comboBox_device.addItem(self.mcu_device)
-                self.comboBox_device.setCurrentIndex(self.comboBox_device.count() - 1)
-
-            # 4. Bloque Create PG File: Sincronizar 'sqtp_dir'
-            if p_sqtp_dir and str(p_sqtp_dir).strip() != '0':
-                self.line_sqtp_dir.setText(str(p_sqtp_dir).strip())
-            else:
-                self.line_sqtp_dir.clear()
-
-            # 5. Bloque Create PG File: Sincronizar 'sqtp_len'
-            if p_sqtp_len and str(p_sqtp_len).strip().isdigit():
-                self.QSpin_SQTPLen2.setValue(int(str(p_sqtp_len).strip()))
-            else:
-                self.QSpin_SQTPLen2.setValue(1) # Valor mínimo por defecto de la UI
-
-            # 6. Bloque Create PG File: Sincronizar 'params'
-            if p_params and str(p_params).strip() != '0':
-                self.line_params.setText(str(p_params).strip())
-            else:
-                self.line_params.clear()
-
-            # [Opcional de regalo] Sincronizar también los campos de firmware del creador para dejarlo impecable
-            if p_prog1 and str(p_prog1).strip() != '0':
-                self.line_Prog_hex1.setText(str(p_prog1).strip())
-            else:
-                self.line_Prog_hex1.clear()
-                
-            if p_prog2 and str(p_prog2).strip() != '0':
-                self.line_Prog_hex2.setText(str(p_prog2).strip())
-            else:
-                self.line_Prog_hex2.clear()
-
-            if self.debug == 1:
-                self.textEdit.append("-> Datos del archivo .pg volcados con éxito en la pestaña Tools.")
-
-        except Exception as e:
-            if self.debug == 1:
-                self.textEdit.append(f"-> Error menor al preconfigurar la pestaña Tools: {str(e)}")
-
-        # Sincronizamos la lista de grabadores y validamos requisitos finales de la pestaña principal
-        self.RefreshPortList()
-        self.Activar_Prog()
-
-    def hexmergefile(self):
-        # Llama a la librería pasándole la cadena de texto de la pantalla
-        exito, msg = omni_firmware.fusionar_e_inyectar_sqtp(self.archivo, self.line_SQTPNumber.text())
-        if not exito:
-            self.showdialog(msg)
-            return None
-        return 'ok'
-
-    def program(self):
-        self.Button_program.setEnabled(False)
-        if self.line_SQTPNumber.text() == '' and self.need_sqtp == 1:
-            self.label_PASS.setText('INVALID SQTP')
-            self.Button_program.setEnabled(True)
-            return
-
-        if self.debug != 1:
-            self.textEdit.clear()            
-        
-        # RESETEAR ESTILO AL INICIAR: Quita el color anterior mientras se graba el chip
-        self.label_PASS.setStyleSheet("") 
-        self.label_PASS.setText("PROGRAMING...")
-        self.textEdit.append(f"Motor de planta activo: [{self.motor_activo.upper()}]")
-        
-        # 1. Extraer parámetros del OmniProg.ini
-        cparser = configparser.ConfigParser(interpolation=None)
-        cparser.read(self.omniprog_ini)
-     
-        tipo_driver = cparser.get(self.motor_activo, "driver", fallback="serial").strip()
-        executable_path = cparser.get(self.motor_activo, "path").replace('"', '')
-        
-        # Cargamos todas las opciones de la sección del motor
-        params_ini = {}
-        if cparser.has_section(self.motor_activo):
-            for opcion in cparser.options(self.motor_activo):
-                params_ini[opcion] = cparser.get(self.motor_activo, opcion)
-
-        #Opciones:
-            # Programacion directa 
-            # Programacion con SQTP PK5
-            # Programacion con SQTP 2 Hex
-
-        # 1. Si necesitamos SQTP
-        if self.need_sqtp == 1:
-            self.label_PASS.setText('GENERATING HEX')
-            QtWidgets.QApplication.processEvents()
-            if tipo_driver == 'flashmagic'
-                exito_merge, msg_merge = omni_firmware.fusionar_e_inyectar_sqtp(self.archivo, self.line_SQTPNumber.text())
-                if not exito_merge:
-                    if self.debug == 1:
-                        # En modo depuración, mandamos todo el log estructurado a la consola de la UI
-                        self.textEdit.append("\n" + "!"*40)
-                        self.textEdit.append("CRITICAL ERROR DURING HEX MERGE")
-                        self.textEdit.append(msg_merge)
-                        self.textEdit.append("!"*40 + "\n")
-                    else:
-                        # En modo producción normal, mostramos el aviso estándar resumido
-                        # Filtramos para no asustar al operario con el log técnico si se acumuló
-                        resumen_error = msg_merge.splitlines()[-1] if "LOG ===" in msg_merge else msg_merge
-                        self.showdialog(resumen_error)
-                        
-                    self.label_PASS.setText('MERGE FAILED')
-                    self.Button_program.setEnabled(True)
-                    return
-            if tipo_driver == 'pickit5'
-
-            # Convertimos result.hex a ruta absoluta completa
-            hex_target = os.path.abspath("result.hex")
-        else:
-            # Si no requiere SQTP, leemos Program1 y calculamos su ruta absoluta
-            _, nombre_hex = omni_lib.readpg(self.archivo, 'Program1')
-            carpeta_proyecto = os.path.dirname(os.path.realpath(self.archivo))
-            hex_target = os.path.abspath(os.path.join(carpeta_proyecto, nombre_hex.strip()))
-        
-        # Extraer parámetros específicos de la placa desde el archivo de configuración .pg
-        _, params_pg = omni_lib.readpg(self.archivo, 'params')
-        params_pg_clean = params_pg.strip() if params_pg else ''
-        
-        # 3. LLAMADA UNIVERSAL AL GESTOR DE DRIVERS BASADO EN PLANTILLAS %
-        target_hardware = self.comboBoxPort.currentText()
-        
-        comando_args, use_shell = omni_drivers.preparar_comando_consola(
-            tipo_driver, 
-            executable_path, 
-            self.mcu_device, 
-            target_hardware, 
-            hex_target, 
-            params_ini, 
-            params_pg_clean
-        )
-
-        # 4. EJECUCIÓN ASÍNCRONA EN EL SISTEMA OPERATIVO
-        self.label_PASS.setText('PROGRAMING')
-        self.textEdit.append(f"Executing: {comando_args}\n")
-        QtWidgets.QApplication.processEvents()
-        
-        returncode = -1
-        try:
-            proc = subprocess.Popen(
-                comando_args, 
-                stdout=subprocess.PIPE, 
-                stderr=subprocess.STDOUT, 
-                text=True, 
-                shell=use_shell
-            )
-            
-            # Captura de la consola en tiempo real
-            while True:
-                linea = proc.stdout.readline()
-                if not linea and proc.poll() is not None:
-                    break
-                if linea:
-                    self.textEdit.append(linea.strip())
-                    QtWidgets.QApplication.processEvents()
-                    
-            returncode = proc.poll()
-        except Exception as e:
-            self.textEdit.append(f"\nExecution Fail: {str(e)}")
-            returncode = -1
-
-        # --- 5. EVALUACIÓN Y GESTIÓN DE CONTADORES EN PLANTA ---
-        texto_consola_completo = self.textEdit.toPlainText().upper()
-        
-        # Filtro de seguridad: error de código o palabras clave en la consola
-        hubo_error_en_texto = any(palabra in texto_consola_completo for palabra in ["ERROR:", "FAIL", "INVALID"])
-        
-        if returncode == 0 and not hubo_error_en_texto:
-            time.sleep(0.5)
-            self.label_PASS.setText('PROGRAM OK')
-            
-            # PINTAMOS EL FONDO VERDE: Fondo verde oscuro, texto blanco y negrita para que resalte
-            self.label_PASS.setStyleSheet("""
-                background-color: #2ECC71; 
-                color: white; 
-                font-weight: bold;
-                border-radius: 4px;
-            """)
-            
-            self.count += 1
-            self.c_pass += 1
-            
-            if self.need_sqtp == 1 and not self.check_SQTPMan.isChecked():
-                element = self.lines[self.puntero_lines]
-                element = ';' + element[1:]
-                self.lines[self.puntero_lines] = element
-                with open(self.line_SQTP.text(), 'wt') as out_file:
-                    for el in self.lines:
-                        out_file.write(el + "\n")
-                self.puntero_lines += 1
+            self.line_SQTPNumber.setEnabled(False)
+            if self.line_SQTP.text() != '':
                 self.SQTP(self.line_SQTP.text())
-        else:
-            self.label_PASS.setText('PROGRAM FAILED')
-            
-            # PINTAMOS EL FONDO ROJO: Fondo rojo industrial, texto blanco y negrita
-            self.label_PASS.setStyleSheet("""
-                background-color: #E74C3C; 
-                color: white; 
-                font-weight: bold;
-                border-radius: 4px;
-            """)
-            
-            self.count += 1
-            self.c_fail += 1
-            
-        self.Button_program.setEnabled(True)
         self.Activar_Prog()
-        self.actualizar_statusbar()
 
     def Generar(self):
         """Despacha la lógica de generación SQTP delegando la validación y el diálogo al backend."""
@@ -480,7 +216,11 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         )
         
         if exito:
-            self.showdialog(f"Archivo de producción generado con éxito en:\n{resultado}")
+            # Cargar de manera reactiva el archivo recién creado en la pestaña principal
+            self.SQTP(resultado)
+            self.CargarPrograma()
+            self.tabWidget.setCurrentIndex(0) # Cambiar al panel de ejecución automáticamente
+            #self.showdialog(f"Archivo de producción generado con éxito en:\n{resultado}")
         else:
             # Si el usuario simplemente canceló el diálogo de guardar, salimos sin alertar de un error falso
             if resultado == "OPERACION_CANCELADA":
@@ -501,107 +241,37 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         self.Activar_Prog()
 
     def SQTP(self, fileName):
-        # --- NUEVO BLOQUE DE CONCURRENCIA ATÓMICA ---
-        # Antes de leer el archivo, intentamos bloquearlo con el archivo .lock de planta
-        bloqueado_ok, msg_err = omni_firmware.intentar_bloquear_sqtp(fileName)
-        if not bloqueado_ok:
-            self.showdialog(f"Warning! Recursos en uso:\n{msg_err}")
-            self.line_SQTPNumber.clear()
-            self.line_SQTP.clear()
-            self.Activar_Prog()
-            return
-
-        # Si el bloqueo es exitoso, extraemos el número de serie de forma habitual
+        # Extraemos el número de serie de forma habitual
         resultado = omni_firmware.extraer_siguiente_sqtp(fileName)
         self.lines, self.puntero_lines, numero_serie = resultado
-        
         if numero_serie:
-            self.line_SQTPNumber.setText(numero_serie)
-            self.line_SQTP.setText(fileName)
-            if len(self.archivo) > 0:
-                self.Button_program.setEnabled(True)
+            if (len(numero_serie) == (self.need_sqtp * 2)):
+                self.line_SQTPNumber.setText(numero_serie)
+                self.line_SQTP.setText(fileName)
+                if len(self.archivo) > 0:
+                    self.Button_program.setEnabled(True)
+            else:
+                self.showdialog("Warning! Este archivo no tiene el numero de bytes correcto.")
+                self.line_SQTPNumber.clear()
+                self.line_SQTP.clear()
+                self.check_SQTPMan.setChecked(False)
+                self.Activar_Prog()
         else:
             self.showdialog("Warning! Este archivo no contiene números SQTP libres.")
-            omni_firmware.liberar_bloqueo_sqtp(fileName) # Liberamos si estaba vacío
             self.line_SQTPNumber.clear()
             self.line_SQTP.clear()
             self.check_SQTPMan.setChecked(False)
             self.Activar_Prog()
 
-    def ManSQTP(self):
-        if self.line_SQTP.text() == '':
-            self.line_SQTPNumber.clear()
-        if self.check_SQTPMan.isChecked():
-            self.line_SQTPNumber.setEnabled(True)
-            if self.line_SQTPNumber.text() == '':
-                self.line_SQTPNumber.setText('00000000')
-        else:
-            self.line_SQTPNumber.setEnabled(False)
-            if self.line_SQTP.text() != '':
-                self.SQTP(self.line_SQTP.text())
-        self.Activar_Prog()
-
     def Activar_Prog(self):
-        """Controla el estado del botón PROGRAM y muestra la línea de comandos preventiva si debug=1."""
+        """Controla el estado del botón PROGRAM."""
         # Validación base de requisitos
         if os.path.exists(self.archivo) and self.comboBoxPort.currentIndex() > 0:
             self.Button_program.setEnabled(True)
-            if (self.need_sqtp == 1) and (not os.path.exists(self.line_SQTP.text())) and (not self.check_SQTPMan.isChecked()):
+            if (self.need_sqtp != 0) and (not os.path.exists(self.line_SQTP.text())) and (not self.check_SQTPMan.isChecked()):
                 self.Button_program.setEnabled(False)
         else:
             self.Button_program.setEnabled(False)
-
-        # --- MODO DEBUG: Escribir la línea de comandos de forma reactiva ---
-        if self.Button_program.isEnabled() and self.debug == 1:
-            # Determinamos el target hexadecimal que se usaría
-            if self.need_sqtp == 1:
-                hex_target = os.path.abspath("result.hex")
-            else:
-                _, nombre_hex = omni_lib.readpg(self.archivo, 'Program1')
-                carpeta_proyecto = os.path.dirname(os.path.realpath(self.archivo))
-                hex_target = os.path.abspath(os.path.join(carpeta_proyecto, nombre_hex.strip()))
-
-            # Extraemos los parámetros de los archivos de configuración de la misma forma que en program()
-            cparser = configparser.ConfigParser(interpolation=None)
-            cparser.read(self.omniprog_ini)
-            
-            tipo_driver = cparser.get(self.motor_activo, "driver", fallback="serial").strip()
-            executable_path = cparser.get(self.motor_activo, "path", fallback="").replace('"', '')
-            
-            params_ini = {}
-            if cparser.has_section(self.motor_activo):
-                for opcion in cparser.options(self.motor_activo):
-                    params_ini[opcion] = cparser.get(self.motor_activo, opcion)
-                    
-            _, params_pg = omni_lib.readpg(self.archivo, 'params')
-            params_pg_clean = params_pg.strip() if params_pg else ''
-            target_hardware = self.comboBoxPort.currentText()
-
-            try:
-                # Invocamos el generador de comandos del driver de manera preventiva
-                comando_args, _ = omni_drivers.preparar_comando_consola(
-                    tipo_driver, 
-                    executable_path, 
-                    self.mcu_device, 
-                    target_hardware, 
-                    hex_target, 
-                    params_ini, 
-                    params_pg_clean
-                )
-                
-                # Convertimos la lista de argumentos a una cadena legible
-                cmd_string = " ".join(comando_args) if isinstance(comando_args, list) else str(comando_args)
-                
-                # Acumulamos la información en el cuadro de texto en lugar de borrar
-                self.textEdit.append("\n" + "="*40)
-                self.textEdit.append("=== PREVENTIVE COMMAND (DEBUG) ===")
-                self.textEdit.append(f"Target Hex: {hex_target}")
-                self.textEdit.append(f"Comando a ejecutar:\n{cmd_string}")
-                
-            except Exception as e:
-                # Acumulamos el error de cálculo si ocurre
-                self.textEdit.append("\n" + "="*40)
-                self.textEdit.append(f"=== DEBUG ERROR ===\nNo se pudo calcular el comando de consola: {str(e)}")
 
     def CompararHexNativo(self):
         """
@@ -683,7 +353,7 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
                     diferencias += 1
                     if diferencias <= max_errores_visibles:
                         self.textEdit.append(f"-> Discrepancia en Dirección [0x{addr:06X}]: "
-                                             f"Prog1 = 0x{byte1:02X} | Prog2 = 0x{byte2:02X}")
+                                             f"Prog1 = 0x{byte1:02X} | 0x{byte2:02X} = Prog2")
                     elif diferencias == max_errores_visibles + 1:
                         self.textEdit.append("... Se omiten el resto de diferencias individuales por espacio ...")
                     
@@ -713,7 +383,8 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         if not hex1_path or not hex2_path:
             self.showdialog("Error de fusión:\nEs obligatorio cargar ambos archivos HEX antes de proceder.")
             return
-
+        #Primero comparamos los archivos.
+        self.CompararHexNativo()
         fileName, _ = QFileDialog.getSaveFileName(self, "Save Merged Hex", hex1_path, "Hex File (*.hex)")
         if fileName:
             # Asegurar extensión .hex si el operario no la escribe
@@ -747,111 +418,65 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         fileName, _ = QFileDialog.getOpenFileName(self, "Open Hex 1", self.defaultprogdir, "Hex File (*.hex)")
         if fileName:
             try:
-                # --- CARGA ELÁSTICA CON PARCHE DE CIERRE DE BLOQUE SEGURO ---
+                # 1. Intentar cargar el archivo directamente con el parser oficial
                 test_ih = IntelHex()
-                try:
-                    # Intento de carga directa estándar
-                    test_ih.loadhex(fileName)
-                except Exception:
-                    # Si falla por overlap, inyectamos las líneas con fin de archivo virtual
-                    test_ih = IntelHex()
-                    import io
-                    with open(fileName, 'r') as f_clean:
-                        for l_raw in f_clean:
-                            l_strip = l_raw.strip()
-                            if l_strip.startswith(':') and not l_strip.startswith(':00000001'):
-                                try:
-                                    # Forzamos el cierre de bloque por línea para que el parser oficial calcule bien
-                                    l_safe = l_strip + "\n:00000001FF"
-                                    th = IntelHex()
-                                    th.loadhex(io.StringIO(l_safe))
-                                    # Volcamos en el búfer maestro manteniendo el direccionamiento extendido real
-                                    for addr in th.addresses():
-                                        test_ih._buf[addr] = th._buf[addr]
-                                except Exception:
-                                    continue
+                test_ih.loadhex(fileName)
                 
+                # 2. Si pasa la línea anterior sin lanzar excepción, el archivo es 100% válido.
+                # Cargamos la ruta en el campo de texto y avisamos en el status bar.
                 self.line_Prog_1.setText(fileName)
                 self.statusBar().showMessage("HEX 1 cargado y validado correctamente.", 4000)
+
             except Exception as e:
-                self.showdialog(f"Error de formato HEX:\nEl archivo seleccionado no es un IntelHex válido.\n\nDetalle: {str(e)}")
+                # 3. Si el parser encuentra CUALQUIER fallo (overlap, fin de archivo ausente, sintaxis), salta aquí.
+                # Muestra el diálogo de error y limpia el campo para mayor seguridad.
+                self.showdialog(f"Error de formato HEX:\nEl archivo seleccionado no cumple con el estándar IntelHex válido.\n\nDetalle: {str(e)}")
                 self.line_Prog_1.clear()
 
     def Selecthex_2(self):
         fileName, _ = QFileDialog.getOpenFileName(self, "Open Hex 2", self.defaultprogdir, "Hex File (*.hex)")
         if fileName:
             try:
-                # --- CARGA ELÁSTICA CON PARCHE DE CIERRE DE BLOQUE SEGURO ---
+                # 1. Intentar cargar el archivo directamente con el parser oficial
                 test_ih = IntelHex()
-                try:
-                    # Intento de carga directa estándar
-                    test_ih.loadhex(fileName)
-                except Exception:
-                    # Si falla por overlap, inyectamos las líneas con fin de archivo virtual
-                    test_ih = IntelHex()
-                    import io
-                    with open(fileName, 'r') as f_clean:
-                        for l_raw in f_clean:
-                            l_strip = l_raw.strip()
-                            if l_strip.startswith(':') and not l_strip.startswith(':00000001'):
-                                try:
-                                    l_safe = l_strip + "\n:00000001FF"
-                                    th = IntelHex()
-                                    th.loadhex(io.StringIO(l_safe))
-                                    for addr in th.addresses():
-                                        test_ih._buf[addr] = th._buf[addr]
-                                except Exception:
-                                    continue
+                test_ih.loadhex(fileName)
                 
+                # 2. Si pasa la línea anterior sin lanzar excepción, el archivo es 100% válido.
+                # Cargamos la ruta en el campo de texto y avisamos en el status bar.
                 self.line_Prog_2.setText(fileName)
                 self.statusBar().showMessage("HEX 2 cargado y validado correctamente.", 4000)
+
             except Exception as e:
-                self.showdialog(f"Error de formato HEX:\nEl archivo seleccionado no es un IntelHex válido.\n\nDetalle: {str(e)}")
+                # 3. Si el parser encuentra CUALQUIER fallo (overlap, fin de archivo ausente, sintaxis), salta aquí.
+                # Muestra el diálogo de error y limpia el campo para mayor seguridad.
+                self.showdialog(f"Error de formato HEX:\nE2 archivo seleccionado no cumple con el estándar IntelHex válido.\n\nDetalle: {str(e)}")
                 self.line_Prog_2.clear()
 
-    def InicializarCreadorPG(self):
-        """Puebla el combobox de micros capturando errores de configuración de forma segura."""
-        self.comboBox_device.clear()
-        self.comboBox_device.addItem(" ") # Índice cero seguro
-        
-        cparser = configparser.ConfigParser()
-        try:
-            if not os.path.exists(self.omniprog_ini):
-                return # Ya lo gestiona Checkini al arrancar
-                
-            cparser.read(self.omniprog_ini)
-            todos_los_micros = []
-            
-            for seccion in cparser.sections():
-                if seccion == "Default":
-                    continue
-                if cparser.has_option(seccion, "micros"):
-                    lista = [m.strip() for m in cparser.get(seccion, "micros").split(',')]
-                    todos_los_micros.extend(lista)
-                    
-            # Eliminar duplicados y ordenar alfabéticamente
-            todos_los_micros = sorted(list(set(todos_los_micros)))
-            self.comboBox_device.addItems(todos_los_micros)
-            
-            # Conexión dinámica de monitorización
-            self.comboBox_device.currentIndexChanged.connect(self.OnDeviceChanged)
-            self.line_sqtp_dir.setEnabled(True)
-            self.line_params.setEnabled(True)
-            
-        except Exception as e:
-            self.statusBar().showMessage(f"Error al procesar lista de micros del creador: {str(e)}", 5000)
+    def InicializarCreadorPGdriver(self):
+        """Puebla el combobox de driver capturando errores de configuración."""
+        self.comboBox_driver.clear()
+        self.comboBox_driver.addItem(" ")
 
-    def OnDeviceChanged(self):
-        """Monitorea el chip seleccionado para alertar o pre-configurar variables."""
-        mcu_seleccionado = self.comboBox_device.currentText().strip()
-        if not mcu_seleccionado:
-            return
-            
-        motor = self.buscar_motor_para_micro(mcu_seleccionado)
-        if motor:
-            self.statusBar().showMessage(f"Dispositivo válido asignado al motor: [{motor.upper()}]", 4000)
-        else:
-            self.statusBar().showMessage("Alerta: El dispositivo no tiene motor asignado en el .ini", 4000)
+        try:
+            self.comboBox_driver.addItems(
+                omni_lib.getsections(self.omniprog_ini, excluir=["Default"])
+            )
+        except Exception as e:
+            self.showdialog(
+                f"Error al procesar lista de drivers del creador: {e}"
+            )
+
+    def InicializarCreadorPGdevice(self):
+        self.comboBox_device.clear()
+        self.comboBox_device.addItem(" ")
+
+        try:
+            self.comboBox_device.addItems(omni_lib.getdevices(self.omniprog_ini))
+        except Exception as e:
+            self.showdialog(
+                f"Error al procesar lista de microcontroladores del creador: {e}"
+            )
+
 
     def Selecthex_hex1(self):
         fileName, _ = QFileDialog.getOpenFileName(self, "Select Program 1 Hex", self.defaultprogdir, "Hex File (*.hex)")
@@ -859,26 +484,25 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
             # Almacenamos el nombre relativo o absoluto para el archivo de configuración
             self.line_Prog_hex1.setText(os.path.basename(fileName))
 
-    def Selecthex_hex2(self):
-        fileName, _ = QFileDialog.getOpenFileName(self, "Select Program 2 Hex", self.defaultprogdir, "Hex File (*.hex)")
-        if fileName:
-            self.line_Prog_hex2.setText(os.path.basename(fileName))
-
     def CreatePGFile(self):
-        """Valida los campos del panel de ingeniería y genera el archivo estructurado .pg utilizando configparser."""
-        device = self.comboBox_device.currentText().strip()
+        """Valida los campos del panel de ingeniería y genera el archivo estructurado .pg
+           Ejemplo de archivo pg: Program / Driver / Device / Params / SQTP_Dir / SQTP_Len"""
         prog1 = self.line_Prog_hex1.text().strip()
-        prog2 = self.line_Prog_hex2.text().strip()
+        driver = self.comboBox_driver.currentText().strip()
+        device = self.comboBox_device.currentText().strip()
+        params = self.line_params.text().strip()
         sqtp_dir = self.line_sqtp_dir.text().strip()
         sqtp_len = self.QSpin_SQTPLen2.value()
-        params = self.line_params.text().strip()
         
         # Validaciones atómicas obligatorias de seguridad industrial
+        if not driver or driver == "":
+            self.showdialog("Error de Validación:\nDebe seleccionar un driver.")
+            return
         if not device or device == "":
             self.showdialog("Error de Validación:\nDebe seleccionar un modelo de microcontrolador (Device).")
             return
         if not prog1:
-            self.showdialog("Error de Validación:\nEl campo 'program1 (hex)' es obligatorio.")
+            self.showdialog("Error de Validación:\nEl campo 'program (hex)' es obligatorio.")
             return
 
         # Abrimos el cuadro de diálogo para guardar el archivo .pg resultante
@@ -891,26 +515,15 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
             fileName += '.pg'
 
         try:
-            # --- CORRECCIÓN 2 y 3: Estructurar con configparser e inyectar la sección [header] ---
-            parser_pg = configparser.ConfigParser()
-            parser_pg.add_section('header')
-            
-            # Seteamos las variables obligatorias y opcionales bajo la sección [header]
-            parser_pg.set('header', 'Device', device)
-            parser_pg.set('header', 'Program1', prog1)
-            
-            if prog2:
-                parser_pg.set('header', 'Program2', prog2)
+            omni_lib.writepg(fileName, 'header', 'Program', prog1)
+            omni_lib.writepg(fileName, 'header', 'driver', driver)
+            omni_lib.writepg(fileName, 'header', 'Device', device)
             if sqtp_dir:
-                parser_pg.set('header', 'SQTP_Dir', sqtp_dir)
-                parser_pg.set('header', 'SQTP_Len', str(sqtp_len))
+                omni_lib.writepg(fileName, 'header', 'SQTP_Dir', sqtp_dir)
+                omni_lib.writepg(fileName, 'header', 'SQTP_Len', str(sqtp_len))
             if params:
-                parser_pg.set('header', 'params', params)
+                omni_lib.writepg(fileName, 'header', 'params', params)
                 
-            # Escritura limpia y nativa compatible al 100% con omni_lib.readpg
-            with open(fileName, 'w', encoding='utf-8') as archivo_pg:
-                parser_pg.write(archivo_pg)
-                    
             self.showdialog(f"Archivo de configuración de planta generado con éxito:\n{os.path.basename(fileName)}")
             
             # Cargar de manera reactiva el archivo recién creado en la pestaña principal
@@ -936,11 +549,296 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         msg.setWindowTitle('OmniProg')
         msg.exec()
 
-    def closeEvent(self, event):
-        # Al cerrar la ventana de forma natural, liberamos el .lock si existía alguno activo
-        if self.need_sqtp == 1 and self.line_SQTP.text() != '':
-            omni_firmware.liberar_bloqueo_sqtp(self.line_SQTP.text())
-        event.accept()
+    def CargarPrograma(self): 
+        # Esta subrutina se ejecuta al recibir un archivo pg y su mision es comprobar que disponemos de los datos necesarios
+        # Ejemplo de archivo pg:        
+        #Program / Driver / Device / Params / SQTP_Dir / SQTP_Len
+        try:
+            # 1. Leer variables del archivo .pg de manera preventiva
+            _, p_Program = omni_lib.readpg(self.archivo, 'Program')
+            _, p_Driver = omni_lib.readpg(self.archivo, 'Driver')
+            _, p_Device = omni_lib.readpg(self.archivo, 'Device')
+            _, p_Params = omni_lib.readpg(self.archivo, 'Params')
+            _, p_SQTP_Len = omni_lib.readpg(self.archivo, 'SQTP_Len')
+            mensaje, p_SQTP_Dir = omni_lib.readpg(self.archivo, 'SQTP_Dir')
+            # Analizar si requiere SQTP
+            mensaje, valor = omni_lib.readpg(self.archivo, 'SQTP_Dir')
+            self.need_sqtp = 0 if mensaje else 1
+            # Configuramos el entorno grafico
+            if self.need_sqtp == 0:
+                self.Button_SQTP.setEnabled(False)
+                self.check_SQTPMan.setEnabled(False)
+                self.line_SQTP.clear()
+                self.line_SQTPNumber.clear()
+                self.line_SQTPNumber.setEnabled(False)
+                self.line_Prog.setText(self.archivo)
+                self.check_SQTPMan.setChecked(False)
+            else:
+                self.Button_SQTP.setEnabled(True)
+                self.check_SQTPMan.setEnabled(True)
+                self.line_Prog.setText(self.archivo)
+                self.FormatoSQTP(int(p_SQTP_Len))
+                self.need_sqtp = int(p_SQTP_Len)
+        except Exception as e:
+            self.showdialog(f"Error al cargar el archivo .pg:\n{str(e)}")
+
+        # Cambiar el directorio de trabajo a la carpeta donde reside el archivo pg.
+        if self.archivo and os.path.exists(self.archivo):
+            os.chdir(os.path.dirname(os.path.realpath(self.archivo)))
+
+        # Sincronizamos la lista de grabadores y validamos requisitos finales de la pestaña principal
+        self.RefreshPortList()
+        self.precarga_tools(p_Program, p_Driver, p_Device, p_Params, p_SQTP_Len, p_SQTP_Dir)
+        self.Activar_Prog()
+
+    def precarga_tools(self, p_Program, p_Driver, p_Device, p_Params, p_SQTP_Len, p_SQTP_Dir):
+        try:
+            # 1. Bloque SQTP Generate: Sincronizar 'Length (Bytes)'
+            if p_SQTP_Len and str(p_SQTP_Len).strip().isdigit():
+                self.QSpin_SQTPLen1.setValue(int(str(p_SQTP_Len).strip()))
+            # 2. Bloque Create PG File
+            # Buscamos si el driver del .pg existe en el combobox para seleccionarlo
+            idx_device = self.comboBox_driver.findText(p_Driver)
+            if idx_device >= 0:
+                self.comboBox_driver.setCurrentIndex(idx_device)
+            # Buscamos si el dispositivo del .pg existe en el combobox para seleccionarlo
+            idx_device = self.comboBox_device.findText(p_Device)
+            if idx_device >= 0:
+                self.comboBox_device.setCurrentIndex(idx_device)
+            # Sincronizar 'sqtp_dir'
+            if p_SQTP_Dir and str(p_SQTP_Dir).strip() != '0':
+                self.line_sqtp_dir.setText(str(p_SQTP_Dir).strip())
+            else:
+                self.line_sqtp_dir.clear()
+            # Sincronizar 'sqtp_len'
+            if p_SQTP_Len and str(p_SQTP_Len).strip().isdigit():
+                self.QSpin_SQTPLen2.setValue(int(str(p_SQTP_Len).strip()))
+            else:
+                self.QSpin_SQTPLen2.setValue(1) # Valor mínimo por defecto de la UI
+            # Sincronizar 'params'
+            if p_Params and str(p_Params).strip() != '0':
+                self.line_params.setText(str(p_Params).strip())
+            else:
+                self.line_params.clear()
+            # [Opcional de regalo] Sincronizar también los campos de firmware del creador para dejarlo impecable
+            if p_Program and str(p_Program).strip() != '0':
+                self.line_Prog_hex1.setText(str(p_Program).strip())
+            else:
+                self.line_Prog_hex1.clear()
+        except Exception as e:
+            self.textEdit.append(f"-> Error menor al preconfigurar la pestaña Tools: {str(e)}")
+
+    def LaunchProgram(self):
+        self.Button_program.setEnabled(False)
+        # Comprobacion extra para los SQTP
+        if self.line_SQTPNumber.text() == '' and self.need_sqtp != 0:
+            self.label_PASS.setText('INVALID SQTP')
+            self.Button_program.setEnabled(True)
+            return
+
+        # 1. RESETEAR ESTILO AL INICIAR: Quita el color anterior mientras se graba el chip
+        self.textEdit.clear()
+        self.label_PASS.setStyleSheet("") 
+        self.label_PASS.setText("Prep. PROGRAMING...")
+        self.textEdit.append(f"Driver activo: {self.driver_activo}")
+
+        # 2. RECOPILAMOS DATOS
+        # Extraer parámetros del OmniProg.ini
+        tipo_driver = omni_lib.readini(self.omniprog_ini, self.driver_activo, "com_method").strip()
+        executable_path = omni_lib.readini(self.omniprog_ini, self.driver_activo, "path").replace('"', '')
+        returncode_ok = str(omni_lib.readini(self.omniprog_ini, self.driver_activo, "returncode_ok"))
+        returncode_bad = str(omni_lib.readini(self.omniprog_ini, self.driver_activo, "returncode_bad"))
+        # Recopilamos los datos del archivo pg
+        _, nombre_hex = omni_lib.readpg(self.archivo, 'Program')
+        carpeta_proyecto = os.path.dirname(os.path.realpath(self.archivo))
+        hex_target = os.path.abspath(os.path.join(carpeta_proyecto, nombre_hex.strip()))
+        _, self.mcu_device = omni_lib.readpg(self.archivo, 'device')        
+        # Extraer parámetros específicos de la placa desde el archivo de configuración .pg
+        _, params_pg = omni_lib.readpg(self.archivo, 'Params')
+        params_pg_clean = params_pg.strip() if params_pg else ''
+        params_ini = {}
+        params_ini['path'] = omni_lib.readini(self.omniprog_ini, self.driver_activo, "path")
+        params_ini['linea_comando'] = omni_lib.readini(self.omniprog_ini, self.driver_activo, "linea_comando")
+        num_result = ''
+        program_name = Path(self.archivo).stem
+
+        # 2. Si necesitamos SQTP
+        if self.need_sqtp != 0:
+            print('NEED SQTP')
+            SQTP_method = omni_lib.readini(self.omniprog_ini, self.driver_activo, "SQTP_method")
+            _, sqtp_dir = omni_lib.readpg(self.archivo, 'SQTP_Dir')
+            _, sqtp_len = omni_lib.readpg(self.archivo, 'SQTP_Len')
+            _, device = omni_lib.readpg(self.archivo, 'device')
+            if (SQTP_method == 'inject'):
+                print ('inject')
+                nombre_result = 'result.hex'
+                carpeta_proyecto = os.path.dirname(os.path.realpath(self.archivo))
+                hex_result = os.path.abspath(os.path.join(carpeta_proyecto, nombre_result.strip()))
+                omni_firmware.inyectar_sqtp(hex_target, sqtp_dir, sqtp_len, self.line_SQTPNumber.text(), hex_result)
+                hex_target = hex_result
+            elif (SQTP_method == 'file'):
+                print ('file')
+                nombre_result = 'sqtp_temp.num'
+                carpeta_proyecto = os.path.dirname(os.path.realpath(self.archivo))
+                num_result = os.path.abspath(os.path.join(carpeta_proyecto, nombre_result.strip()))
+                try:
+                    # Intentamos generar el archivo temporal para ipecmd
+                    omni_firmware.generar_archivo_intel_hex_sqtp(sqtp_dir, sqtp_len, self.line_SQTPNumber.text(), num_result, device)
+                except (ValueError, RuntimeError) as e:
+                    return
+            else:
+                self.label_PASS.setText('INVALID SQTP METHOD')
+                self.Button_program.setEnabled(True)
+            self.textEdit.append(f"Num/File SQTP creating\n")
+            time.sleep(1.5)
+        else:
+            print('NO NEED SQTP')
+        
+        # 3. LLAMADA UNIVERSAL AL GESTOR DE DRIVERS BASADO EN PLANTILLAS %
+        target_hardware = self.comboBoxPort.currentText()
+        comando_args, use_shell = omni_drivers.preparar_comando_consola(
+            tipo_driver, 
+            executable_path, 
+            self.mcu_device, 
+            target_hardware, 
+            hex_target,
+            params_ini, 
+            params_pg_clean,
+            num_result,
+            program_name
+        )
+
+        # 4. EJECUCIÓN ASÍNCRONA EN EL SISTEMA OPERATIVO
+        self.label_PASS.setText('PROGRAMING')
+        self.textEdit.append(f"Executing: {comando_args}\n")
+        QtWidgets.QApplication.processEvents()
+
+        returncode = -1
+        try:
+            proc = subprocess.Popen(
+                comando_args, 
+                stdout=subprocess.PIPE, 
+                stderr=subprocess.STDOUT, 
+                text=True, 
+                shell=use_shell
+            )
+            
+            # Captura de la consola en tiempo real
+            while True:
+                linea = proc.stdout.readline()
+                if not linea and proc.poll() is not None:
+                    break
+                if linea:
+                    self.textEdit.append(linea.strip())
+                    QtWidgets.QApplication.processEvents()
+                    
+            returncode = proc.poll()
+            self.textEdit.append(f"Returncode: {returncode}\n")
+        except Exception as e:
+            self.textEdit.append(f"\nExecution Fail: {str(e)}")
+            return
+
+        # 5. EVALUACIÓN Y GESTIÓN DE CONTADORES EN PLANTA ---
+        texto_consola_completo = self.textEdit.toPlainText().upper()
+
+        # Filtro de seguridad: error de código o palabras clave en la consola
+        result = self.evaluar_resultado_programacion(returncode, texto_consola_completo, returncode_ok, returncode_bad)
+        if (result == 0):
+            time.sleep(0.5)
+            self.label_PASS.setText('PROGRAM OK')
+            
+            # PINTAMOS EL FONDO VERDE: Fondo verde oscuro, texto blanco y negrita para que resalte
+            self.label_PASS.setStyleSheet("""
+                background-color: #2ECC71; 
+                color: white; 
+                font-weight: bold;
+                border-radius: 4px;
+            """)
+            
+            self.count += 1
+            self.c_pass += 1
+            
+            if self.need_sqtp != 0 and not self.check_SQTPMan.isChecked():
+                element = self.lines[self.puntero_lines]
+                element = ';' + element[1:]
+                self.lines[self.puntero_lines] = element
+                with open(self.line_SQTP.text(), 'wt') as out_file:
+                    for el in self.lines:
+                        out_file.write(el + "\n")
+                self.puntero_lines += 1
+                self.SQTP(self.line_SQTP.text())
+        else:
+            self.label_PASS.setText('PROGRAM FAILED')
+            # Escribimos en un log
+            self.guardar_log(texto_consola_completo)
+            # PINTAMOS EL FONDO ROJO: Fondo rojo industrial, texto blanco y negrita
+            self.label_PASS.setStyleSheet("""
+                background-color: #E74C3C; 
+                color: white; 
+                font-weight: bold;
+                border-radius: 4px;
+            """)
+            
+            self.count += 1
+            self.c_fail += 1
+
+        self.Button_program.setEnabled(True)
+        self.Activar_Prog()
+        self.actualizar_statusbar()
+
+
+    def evaluar_resultado_programacion(self, returncode, texto_consola, texto_ok, texto_mal):
+        print("texto_consola:\n", str(texto_consola))
+        print("texto_ok:", texto_ok.upper())
+        print("texto_mal:", texto_mal.upper())
+        print("returncode:", returncode)
+        """
+        Evalúa el éxito de la programación (0 = Éxito, 1 = Fallo).
+        Fuerza el éxito si el texto_ok está presente y es posterior al texto_mal.
+        """
+        # 1. Buscar las últimas posiciones de los textos (-1 si no existen)
+        pos_ok = texto_consola.rfind(texto_ok.upper())
+        print(f"Find Texto Pass: {str(pos_ok)}")
+        pos_mal = texto_consola.rfind(texto_mal.upper())
+        print(f"Find Texto Fail: {str(pos_mal)}")
+        encontrado_ok = pos_ok != -1
+        encontrado_mal = pos_mal != -1
+        self.textEdit.append(f"ok: {str(pos_ok)} bad: {str(pos_mal)}")
+        if (encontrado_ok >= encontrado_mal):
+            texto = 0 #texto bien al final
+        else:
+            texto = 1 #texto mal al final
+        if returncode == 0  and texto == 0:
+            return 0
+        elif returncode == 0  and texto == 1:
+            return 1
+        elif returncode != 0  and texto == 0:
+            return 0
+        elif returncode != 0  and texto == 1:
+            return 1
+
+
+    def guardar_log(self, texto_consola):
+        """
+        Guarda el texto de la consola en un archivo 'errores.log' 
+        antecediendo la fecha y hora en formato AAAA/MM/DD HH:MM:SS.
+        """
+        self.textEdit.append(f"Log: {self.omniprog_log}\n")
+        # 1. Obtener la fecha y hora actual en el formato deseado
+        ahora = datetime.now()
+        fecha_formateada = ahora.strftime("%Y/%m/%d %H:%M:%S")
+        
+        # 2. Abrir el archivo en modo 'a' (append / añadir al final) con codificación UTF-8
+        with open(self.omniprog_log, "a", encoding="utf-8") as archivo:
+            # Escribimos el encabezado con la fecha
+            archivo.write(f"\n========================================\n")
+            archivo.write(f"REGISTRO: {fecha_formateada}\n")
+            archivo.write(f"========================================\n")
+            
+            # Escribimos el volcado de la consola
+            archivo.write(texto_consola)
+            archivo.write("\n") # Un salto de línea final para separar del siguiente registro
+
 
 if __name__ == "__main__":
     parsed_args, unparsed_args = process_cl_args()

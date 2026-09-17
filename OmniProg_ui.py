@@ -19,7 +19,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QComboBox, QGridLayout,
     QGroupBox, QHBoxLayout, QLabel, QLineEdit,
     QMainWindow, QPushButton, QSizePolicy, QSpacerItem,
     QSpinBox, QStatusBar, QTabWidget, QTextEdit,
-    QToolButton, QWidget)
+    QToolButton, QWidget, QStyle)
 
 class Ui_MainWindow(object):
     def setupUi(self, MainWindow):
@@ -112,14 +112,17 @@ class Ui_MainWindow(object):
 
         self.Button_rescan = QPushButton(self.Program)
         self.Button_rescan.setObjectName(u"Button_rescan")
+        self.Button_rescan.setEnabled(True)
         self.Button_rescan.setMinimumSize(QSize(30, 24))
         self.Button_rescan.setMaximumSize(QSize(30, 24))
-        icon = QIcon()
-        icon.addFile(u"Ico_refresh.png", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
-        self.Button_rescan.setIcon(icon)
+        # ➡️ Solución: Usar el icono de "recargar" nativo del sistema operativo
+        icon_sistema = self.style().standardIcon(QStyle.SP_BrowserReload)
+        self.Button_rescan.setIcon(icon_sistema)
+        #icon = QIcon()
+        #icon.addFile(u"Ico_refresh.png", QSize(), QIcon.Mode.Normal, QIcon.State.Off)
+        #self.Button_rescan.setIcon(icon)
 
         self.horizontalLayout_8.addWidget(self.Button_rescan)
-
 
         self.gridLayout_10.addLayout(self.horizontalLayout_8, 2, 0, 1, 1)
 
@@ -297,6 +300,7 @@ class Ui_MainWindow(object):
         self.QSpin_SQTPLen1 = QSpinBox(self.groupBox)
         self.QSpin_SQTPLen1.setObjectName(u"QSpin_SQTPLen1")
         self.QSpin_SQTPLen1.setMinimum(1)
+        self.QSpin_SQTPLen1.setMaximum(8)
 
         self.gridLayout.addWidget(self.QSpin_SQTPLen1, 0, 5, 1, 1)
 
@@ -320,72 +324,6 @@ class Ui_MainWindow(object):
         self.groupBox_4.setObjectName(u"groupBox_4")
         self.gridLayout_11 = QGridLayout(self.groupBox_4)
         self.gridLayout_11.setObjectName(u"gridLayout_11")
-        self.Button_createpg = QPushButton(self.groupBox_4)
-        self.Button_createpg.setObjectName(u"Button_createpg")
-        self.Button_createpg.setEnabled(True)
-
-        self.gridLayout_11.addWidget(self.Button_createpg, 6, 0, 1, 1)
-
-        self.horizontalLayout_14 = QHBoxLayout()
-        self.horizontalLayout_14.setObjectName(u"horizontalLayout_14")
-        self.label_12 = QLabel(self.groupBox_4)
-        self.label_12.setObjectName(u"label_12")
-        self.label_12.setMinimumSize(QSize(120, 0))
-        self.label_12.setMaximumSize(QSize(120, 16777215))
-
-        self.horizontalLayout_14.addWidget(self.label_12)
-
-        self.line_params = QLineEdit(self.groupBox_4)
-        self.line_params.setObjectName(u"line_params")
-        self.line_params.setEnabled(False)
-
-        self.horizontalLayout_14.addWidget(self.line_params)
-
-
-        self.gridLayout_11.addLayout(self.horizontalLayout_14, 5, 0, 1, 1)
-
-        self.horizontalLayout_11 = QHBoxLayout()
-        self.horizontalLayout_11.setObjectName(u"horizontalLayout_11")
-        self.label_8 = QLabel(self.groupBox_4)
-        self.label_8.setObjectName(u"label_8")
-        self.label_8.setMinimumSize(QSize(120, 0))
-        self.label_8.setMaximumSize(QSize(120, 16777215))
-
-        self.horizontalLayout_11.addWidget(self.label_8)
-
-        self.line_Prog_hex2 = QLineEdit(self.groupBox_4)
-        self.line_Prog_hex2.setObjectName(u"line_Prog_hex2")
-        self.line_Prog_hex2.setEnabled(False)
-
-        self.horizontalLayout_11.addWidget(self.line_Prog_hex2)
-
-        self.Button_Prog_hex2 = QToolButton(self.groupBox_4)
-        self.Button_Prog_hex2.setObjectName(u"Button_Prog_hex2")
-        self.Button_Prog_hex2.setEnabled(True)
-
-        self.horizontalLayout_11.addWidget(self.Button_Prog_hex2)
-
-
-        self.gridLayout_11.addLayout(self.horizontalLayout_11, 1, 0, 1, 1)
-
-        self.horizontalLayout_13 = QHBoxLayout()
-        self.horizontalLayout_13.setObjectName(u"horizontalLayout_13")
-        self.label_10 = QLabel(self.groupBox_4)
-        self.label_10.setObjectName(u"label_10")
-        self.label_10.setMinimumSize(QSize(120, 0))
-        self.label_10.setMaximumSize(QSize(120, 16777215))
-
-        self.horizontalLayout_13.addWidget(self.label_10)
-
-        self.line_sqtp_dir = QLineEdit(self.groupBox_4)
-        self.line_sqtp_dir.setObjectName(u"line_sqtp_dir")
-        self.line_sqtp_dir.setEnabled(False)
-
-        self.horizontalLayout_13.addWidget(self.line_sqtp_dir)
-
-
-        self.gridLayout_11.addLayout(self.horizontalLayout_13, 3, 0, 1, 1)
-
         self.horizontalLayout_10 = QHBoxLayout()
         self.horizontalLayout_10.setObjectName(u"horizontalLayout_10")
         self.label_7 = QLabel(self.groupBox_4)
@@ -409,6 +347,12 @@ class Ui_MainWindow(object):
 
         self.gridLayout_11.addLayout(self.horizontalLayout_10, 0, 0, 1, 1)
 
+        self.Button_createpg = QPushButton(self.groupBox_4)
+        self.Button_createpg.setObjectName(u"Button_createpg")
+        self.Button_createpg.setEnabled(True)
+
+        self.gridLayout_11.addWidget(self.Button_createpg, 5, 0, 1, 1)
+
         self.horizontalLayout_12 = QHBoxLayout()
         self.horizontalLayout_12.setObjectName(u"horizontalLayout_12")
         self.label_9 = QLabel(self.groupBox_4)
@@ -426,23 +370,72 @@ class Ui_MainWindow(object):
 
         self.gridLayout_11.addLayout(self.horizontalLayout_12, 2, 0, 1, 1)
 
-        self.horizontalLayout_15 = QHBoxLayout()
-        self.horizontalLayout_15.setObjectName(u"horizontalLayout_15")
+        self.horizontalLayout_14 = QHBoxLayout()
+        self.horizontalLayout_14.setObjectName(u"horizontalLayout_14")
+        self.label_12 = QLabel(self.groupBox_4)
+        self.label_12.setObjectName(u"label_12")
+        self.label_12.setMinimumSize(QSize(120, 0))
+        self.label_12.setMaximumSize(QSize(120, 16777215))
+
+        self.horizontalLayout_14.addWidget(self.label_12)
+
+        self.line_params = QLineEdit(self.groupBox_4)
+        self.line_params.setObjectName(u"line_params")
+        self.line_params.setEnabled(True)
+
+        self.horizontalLayout_14.addWidget(self.line_params)
+
+
+        self.gridLayout_11.addLayout(self.horizontalLayout_14, 4, 0, 1, 1)
+
+        self.horizontalLayout_13 = QHBoxLayout()
+        self.horizontalLayout_13.setObjectName(u"horizontalLayout_13")
+        self.label_10 = QLabel(self.groupBox_4)
+        self.label_10.setObjectName(u"label_10")
+        self.label_10.setMinimumSize(QSize(120, 0))
+        self.label_10.setMaximumSize(QSize(120, 16777215))
+
+        self.horizontalLayout_13.addWidget(self.label_10)
+
+        self.line_sqtp_dir = QLineEdit(self.groupBox_4)
+        self.line_sqtp_dir.setObjectName(u"line_sqtp_dir")
+        self.line_sqtp_dir.setEnabled(True)
+
+        self.horizontalLayout_13.addWidget(self.line_sqtp_dir)
+
         self.label_11 = QLabel(self.groupBox_4)
         self.label_11.setObjectName(u"label_11")
-        self.label_11.setMinimumSize(QSize(120, 0))
-        self.label_11.setMaximumSize(QSize(120, 16777215))
+        self.label_11.setMinimumSize(QSize(80, 0))
+        self.label_11.setMaximumSize(QSize(80, 16777215))
 
-        self.horizontalLayout_15.addWidget(self.label_11)
+        self.horizontalLayout_13.addWidget(self.label_11)
 
         self.QSpin_SQTPLen2 = QSpinBox(self.groupBox_4)
         self.QSpin_SQTPLen2.setObjectName(u"QSpin_SQTPLen2")
         self.QSpin_SQTPLen2.setMinimum(1)
+        self.QSpin_SQTPLen2.setMaximum(8)
 
-        self.horizontalLayout_15.addWidget(self.QSpin_SQTPLen2)
+        self.horizontalLayout_13.addWidget(self.QSpin_SQTPLen2)
 
 
-        self.gridLayout_11.addLayout(self.horizontalLayout_15, 4, 0, 1, 1)
+        self.gridLayout_11.addLayout(self.horizontalLayout_13, 3, 0, 1, 1)
+
+        self.horizontalLayout_11 = QHBoxLayout()
+        self.horizontalLayout_11.setObjectName(u"horizontalLayout_11")
+        self.label_8 = QLabel(self.groupBox_4)
+        self.label_8.setObjectName(u"label_8")
+        self.label_8.setMinimumSize(QSize(120, 0))
+        self.label_8.setMaximumSize(QSize(120, 16777215))
+
+        self.horizontalLayout_11.addWidget(self.label_8)
+
+        self.comboBox_driver = QComboBox(self.groupBox_4)
+        self.comboBox_driver.setObjectName(u"comboBox_driver")
+
+        self.horizontalLayout_11.addWidget(self.comboBox_driver)
+
+
+        self.gridLayout_11.addLayout(self.horizontalLayout_11, 1, 0, 1, 1)
 
 
         self.gridLayout_6.addWidget(self.groupBox_4, 3, 0, 1, 1)
@@ -452,6 +445,7 @@ class Ui_MainWindow(object):
         self.statusbar = QStatusBar(MainWindow)
         self.statusbar.setObjectName(u"statusbar")
         MainWindow.setStatusBar(self.statusbar)
+        QWidget.setTabOrder(self.tabWidget, self.line_Prog)
         QWidget.setTabOrder(self.line_Prog, self.Button_Prog)
         QWidget.setTabOrder(self.Button_Prog, self.line_SQTP)
         QWidget.setTabOrder(self.line_SQTP, self.Button_SQTP)
@@ -461,8 +455,7 @@ class Ui_MainWindow(object):
         QWidget.setTabOrder(self.check_SQTPMan, self.line_SQTPNumber)
         QWidget.setTabOrder(self.line_SQTPNumber, self.Button_program)
         QWidget.setTabOrder(self.Button_program, self.textEdit)
-        QWidget.setTabOrder(self.textEdit, self.tabWidget)
-        QWidget.setTabOrder(self.tabWidget, self.line_Num_Ini)
+        QWidget.setTabOrder(self.textEdit, self.line_Num_Ini)
         QWidget.setTabOrder(self.line_Num_Ini, self.QSpin_Cantidad)
         QWidget.setTabOrder(self.QSpin_Cantidad, self.QSpin_SQTPLen1)
         QWidget.setTabOrder(self.QSpin_SQTPLen1, self.Button_Generar)
@@ -470,15 +463,15 @@ class Ui_MainWindow(object):
         QWidget.setTabOrder(self.line_Prog_1, self.Button_Prog_1)
         QWidget.setTabOrder(self.Button_Prog_1, self.line_Prog_2)
         QWidget.setTabOrder(self.line_Prog_2, self.Button_Prog_2)
-        QWidget.setTabOrder(self.Button_Prog_2, self.Button_C_Reset)
+        QWidget.setTabOrder(self.Button_Prog_2, self.Button_Merge)
+        QWidget.setTabOrder(self.Button_Merge, self.Button_Compare)
+        QWidget.setTabOrder(self.Button_Compare, self.Button_C_Reset)
         QWidget.setTabOrder(self.Button_C_Reset, self.line_Prog_hex1)
         QWidget.setTabOrder(self.line_Prog_hex1, self.Button_Prog_hex1)
-        QWidget.setTabOrder(self.Button_Prog_hex1, self.line_Prog_hex2)
-        QWidget.setTabOrder(self.line_Prog_hex2, self.Button_Prog_hex2)
-        QWidget.setTabOrder(self.Button_Prog_hex2, self.comboBox_device)
+        QWidget.setTabOrder(self.Button_Prog_hex1, self.comboBox_driver)
+        QWidget.setTabOrder(self.comboBox_driver, self.comboBox_device)
         QWidget.setTabOrder(self.comboBox_device, self.line_sqtp_dir)
-        QWidget.setTabOrder(self.line_sqtp_dir, self.QSpin_SQTPLen2)
-        QWidget.setTabOrder(self.QSpin_SQTPLen2, self.line_params)
+        QWidget.setTabOrder(self.line_sqtp_dir, self.line_params)
         QWidget.setTabOrder(self.line_params, self.Button_createpg)
 
         self.retranslateUi(MainWindow)
@@ -520,19 +513,17 @@ class Ui_MainWindow(object):
         self.label.setText(QCoreApplication.translate("MainWindow", u"Length (Bytes)", None))
         self.Button_Generar.setText(QCoreApplication.translate("MainWindow", u"Generar", None))
         self.groupBox_4.setTitle(QCoreApplication.translate("MainWindow", u"Create PG File", None))
-        self.Button_createpg.setText(QCoreApplication.translate("MainWindow", u"Create PG File", None))
-        self.label_12.setText(QCoreApplication.translate("MainWindow", u"params", None))
-        self.line_params.setText("")
-        self.label_8.setText(QCoreApplication.translate("MainWindow", u"program2 (hex)", None))
-        self.line_Prog_hex2.setText("")
-        self.Button_Prog_hex2.setText(QCoreApplication.translate("MainWindow", u"...", None))
-        self.label_10.setText(QCoreApplication.translate("MainWindow", u"sqtp_dir:", None))
-        self.line_sqtp_dir.setText("")
-        self.label_7.setText(QCoreApplication.translate("MainWindow", u"program1 (hex)", None))
+        self.label_7.setText(QCoreApplication.translate("MainWindow", u"Program (hex)", None))
         self.line_Prog_hex1.setText("")
         self.Button_Prog_hex1.setText(QCoreApplication.translate("MainWindow", u"...", None))
+        self.Button_createpg.setText(QCoreApplication.translate("MainWindow", u"Create PG File", None))
         self.label_9.setText(QCoreApplication.translate("MainWindow", u"device:", None))
+        self.label_12.setText(QCoreApplication.translate("MainWindow", u"params", None))
+        self.line_params.setText("")
+        self.label_10.setText(QCoreApplication.translate("MainWindow", u"sqtp_dir:", None))
+        self.line_sqtp_dir.setText("")
         self.label_11.setText(QCoreApplication.translate("MainWindow", u"sqtp_len:", None))
+        self.label_8.setText(QCoreApplication.translate("MainWindow", u"Driver:", None))
         self.tabWidget.setTabText(self.tabWidget.indexOf(self.Tools), QCoreApplication.translate("MainWindow", u"Tools", None))
     # retranslateUi
 
