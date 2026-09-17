@@ -1,5 +1,7 @@
 # 🛠️ OmniProg
 
+I make no warranty or responsibility for anything associated with this program. Use it at your responsibility and risk.
+
 OmniProg is a desktop application developed in Python featuring an interactive Graphical User Interface (GUI). It is designed to simplify the management, communication, and control of firmware and hardware drivers by acting as a unified frontend for external programming tools.
 
 ## 🚀 Key Features
