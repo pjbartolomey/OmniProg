@@ -27,8 +27,6 @@ from pathlib import Path
 # Importamos la interfaz moderna recién generada
 from OmniProg_ui import Ui_MainWindow
 
-VERSION = 'Ver: 1 (OmniProg)'
-
 def process_cl_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('open', nargs='?', action='store')  # Captura el archivo .pg al hacer doble clic
@@ -42,7 +40,6 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         self.setupUi(self)
         
         # --- ENCAPSULACIÓN MAESTRA (Multi-instancia segura) ---
-        self.version = VERSION
         self.omniprog_ini = 'OmniProg.ini'
         self.omniprog_log = 'Error.log'
         self.lines = []
@@ -89,16 +86,18 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         
         # Inicialización de entorno base
         self.actualizar_statusbar()
-        
-        # Si se abrió el software mediante doble clic en un archivo .pg
-        if self.archivo != '':
-            self.CargarPrograma()
+        self.label_Ver.setText('Version: 2026/10/31\nGPL-3.0 license')
 
         # Inicializar el combo del creador de archivos .pg leyendo el archivo .ini de planta
         self.InicializarCreadorPGdriver()
 
         # Inicializar el combo del creador de archivos .pg leyendo el archivo .ini de planta
         self.InicializarCreadorPGdevice()
+
+        # Si se abrió el software mediante doble clic en un archivo .pg
+        if self.archivo != '':
+            self.CargarPrograma()
+
 
     def Checkini(self):
         """Inicializa las rutas buscando de forma segura los parámetros base en el archivo .ini."""
@@ -555,9 +554,15 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         #Program / Driver / Device / Params / SQTP_Dir / SQTP_Len
         try:
             # 1. Leer variables del archivo .pg de manera preventiva
-            _, p_Program = omni_lib.readpg(self.archivo, 'Program')
-            _, p_Driver = omni_lib.readpg(self.archivo, 'Driver')
-            _, p_Device = omni_lib.readpg(self.archivo, 'Device')
+            mensaje, p_Program = omni_lib.readpg(self.archivo, 'Program')
+            if mensaje:
+                raise ValueError (mensaje)
+            mensaje, p_Driver = omni_lib.readpg(self.archivo, 'Driver')
+            if mensaje:
+                raise ValueError (mensaje)
+            mensaje, p_Device = omni_lib.readpg(self.archivo, 'Device')
+            if mensaje:
+                raise ValueError (mensaje)
             _, p_Params = omni_lib.readpg(self.archivo, 'Params')
             _, p_SQTP_Len = omni_lib.readpg(self.archivo, 'SQTP_Len')
             mensaje, p_SQTP_Dir = omni_lib.readpg(self.archivo, 'SQTP_Dir')
@@ -579,54 +584,64 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
                 self.line_Prog.setText(self.archivo)
                 self.FormatoSQTP(int(p_SQTP_Len))
                 self.need_sqtp = int(p_SQTP_Len)
-        except Exception as e:
+        except ValueError as e:
             self.showdialog(f"Error al cargar el archivo .pg:\n{str(e)}")
 
         # Cambiar el directorio de trabajo a la carpeta donde reside el archivo pg.
         if self.archivo and os.path.exists(self.archivo):
             os.chdir(os.path.dirname(os.path.realpath(self.archivo)))
+        else:
+            self.showdialog(f"Problema con la ruta del archivo .pg")
 
         # Sincronizamos la lista de grabadores y validamos requisitos finales de la pestaña principal
-        self.RefreshPortList()
-        self.precarga_tools(p_Program, p_Driver, p_Device, p_Params, p_SQTP_Len, p_SQTP_Dir)
-        self.Activar_Prog()
+        try:
+            self.precarga_tools(p_Program, p_Driver, p_Device, p_Params, p_SQTP_Len, p_SQTP_Dir)
+            self.RefreshPortList()
+            self.Activar_Prog()
+        except KeyError as e:
+            self.showdialog(f"{e}")
 
     def precarga_tools(self, p_Program, p_Driver, p_Device, p_Params, p_SQTP_Len, p_SQTP_Dir):
-        try:
-            # 1. Bloque SQTP Generate: Sincronizar 'Length (Bytes)'
-            if p_SQTP_Len and str(p_SQTP_Len).strip().isdigit():
-                self.QSpin_SQTPLen1.setValue(int(str(p_SQTP_Len).strip()))
-            # 2. Bloque Create PG File
-            # Buscamos si el driver del .pg existe en el combobox para seleccionarlo
-            idx_device = self.comboBox_driver.findText(p_Driver)
-            if idx_device >= 0:
-                self.comboBox_driver.setCurrentIndex(idx_device)
-            # Buscamos si el dispositivo del .pg existe en el combobox para seleccionarlo
-            idx_device = self.comboBox_device.findText(p_Device)
-            if idx_device >= 0:
-                self.comboBox_device.setCurrentIndex(idx_device)
-            # Sincronizar 'sqtp_dir'
-            if p_SQTP_Dir and str(p_SQTP_Dir).strip() != '0':
-                self.line_sqtp_dir.setText(str(p_SQTP_Dir).strip())
-            else:
-                self.line_sqtp_dir.clear()
-            # Sincronizar 'sqtp_len'
-            if p_SQTP_Len and str(p_SQTP_Len).strip().isdigit():
-                self.QSpin_SQTPLen2.setValue(int(str(p_SQTP_Len).strip()))
-            else:
-                self.QSpin_SQTPLen2.setValue(1) # Valor mínimo por defecto de la UI
-            # Sincronizar 'params'
-            if p_Params and str(p_Params).strip() != '0':
-                self.line_params.setText(str(p_Params).strip())
-            else:
-                self.line_params.clear()
-            # [Opcional de regalo] Sincronizar también los campos de firmware del creador para dejarlo impecable
-            if p_Program and str(p_Program).strip() != '0':
-                self.line_Prog_hex1.setText(str(p_Program).strip())
-            else:
+        # 1. Bloque SQTP Generate: Sincronizar 'Length (Bytes)'
+        if p_SQTP_Len and str(p_SQTP_Len).strip().isdigit():
+            self.QSpin_SQTPLen1.setValue(int(str(p_SQTP_Len).strip()))
+        # 2. Bloque Create PG File
+        # Buscamos si el driver del .pg existe en el combobox para seleccionarlo
+        idx_device = self.comboBox_driver.findText(p_Driver)
+        if idx_device >= 0:
+            self.comboBox_driver.setCurrentIndex(idx_device)
+        else:
+            raise KeyError ("ERROR: Driver no encontrado")
+        # Buscamos si el dispositivo del .pg existe en el combobox para seleccionarlo
+        idx_device = self.comboBox_device.findText(p_Device)
+        if idx_device >= 0:
+            self.comboBox_device.setCurrentIndex(idx_device)
+        else:
+            raise KeyError ("ERROR: Device no encontrado")
+        # Sincronizar 'sqtp_dir'
+        if p_SQTP_Dir and str(p_SQTP_Dir).strip() != '0':
+            self.line_sqtp_dir.setText(str(p_SQTP_Dir).strip())
+        else:
+            self.line_sqtp_dir.clear()
+        # Sincronizar 'sqtp_len'
+        if p_SQTP_Len and str(p_SQTP_Len).strip().isdigit():
+            self.QSpin_SQTPLen2.setValue(int(str(p_SQTP_Len).strip()))
+        else:
+            self.QSpin_SQTPLen2.setValue(1) # Valor mínimo por defecto de la UI
+        # Sincronizar 'params'
+        if p_Params and str(p_Params).strip() != '0':
+            self.line_params.setText(str(p_Params).strip())
+        else:
+            self.line_params.clear()
+        # [Opcional de regalo] Sincronizar también los campos de firmware del creador para dejarlo impecable
+        if p_Program and str(p_Program).strip() != '0':
+            if not (os.path.exists(p_Program)): #aqui verificamos que el hex existe.
                 self.line_Prog_hex1.clear()
-        except Exception as e:
-            self.textEdit.append(f"-> Error menor al preconfigurar la pestaña Tools: {str(e)}")
+                raise KeyError ("ERROR: Hex no encontrado")
+            else:
+                self.line_Prog_hex1.setText(str(p_Program).strip())
+        else:
+            self.line_Prog_hex1.clear()
 
     def LaunchProgram(self):
         self.Button_program.setEnabled(False)
@@ -804,10 +819,12 @@ class MyApp(QtWidgets.QMainWindow, Ui_MainWindow):
         encontrado_ok = pos_ok != -1
         encontrado_mal = pos_mal != -1
         self.textEdit.append(f"ok: {str(pos_ok)} bad: {str(pos_mal)}")
-        if (encontrado_ok >= encontrado_mal):
+
+        if ((encontrado_ok > encontrado_mal) and (encontrado_mal != -1)) :
             texto = 0 #texto bien al final
         else:
             texto = 1 #texto mal al final
+
         if returncode == 0  and texto == 0:
             return 0
         elif returncode == 0  and texto == 1:
